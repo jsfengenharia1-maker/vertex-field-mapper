@@ -105,17 +105,43 @@ function scriptDeMapeamento(opcoes) {
   }
 
   // ── 1b. Detecção de SPA via window globals (mais robusta que innerHTML) ────
-  // Só funciona quando o script roda em world:'MAIN' (vide executarScript)
+  // Só funciona quando o script roda em world:'MAIN' (vide executarScript).
+  // IMPORTANTE: NÃO usar __REACT_DEVTOOLS_GLOBAL_HOOK__, __VUE_DEVTOOLS_GLOBAL_HOOK__,
+  // getAllAngularRootElements etc — essas extensões de devtools injetam esses
+  // globals em TODAS as páginas, gerando falso positivo em sites não-SPA.
   const W = (typeof window !== 'undefined') ? window : {};
+
+  // Helper: detecta React via chaves internas em containers do body.
+  // React 16+: cada container do body ganha chave '__reactContainer$<hash>'.
+  // React legado: cada container ganha propriedade '_reactRootContainer'.
+  const hasReactContainer = (() => {
+    try {
+      const filhos = Array.from(document.body?.children || []);
+      return filhos.some(el =>
+        el._reactRootContainer ||
+        Object.keys(el).some(k => k.startsWith('__reactContainer$') || k.startsWith('__reactFiber$'))
+      );
+    } catch(_) { return false; }
+  })();
+
   const spa = {
-    react:    !!(W.React || W.__REACT_DEVTOOLS_GLOBAL_HOOK__ || document.querySelector('[data-reactroot]')),
-    next:     !!(W.__NEXT_DATA__ || document.getElementById('__next')),
-    vue:      !!(W.Vue || W.__VUE__ || document.querySelector('[data-v-app]')),
-    nuxt:     !!(W.__NUXT__ || W.$nuxt),
-    angular:  !!(W.ng || W.getAllAngularRootElements),
-    svelte:   !!document.querySelector('[class*="svelte-"]'),
-    preact:   !!(W.preact),
-    solid:    !!(W._$HY),
+    // React: exige React.version (objeto real), [data-reactroot] no DOM,
+    // [data-react-helmet], OU container interno do React no body.
+    react: !!(W.React?.version || document.querySelector('[data-reactroot],[data-react-helmet]') || hasReactContainer),
+    // Next.js: __NEXT_DATA__ é injetado pelo Next no SSR; <div id="__next"> idem.
+    next:  !!(W.__NEXT_DATA__ || document.getElementById('__next')),
+    // Vue: Vue.version (Vue 2 global), __VUE__ apenas se tiver Vue real anexado,
+    // ou marcadores SSR/CSR no DOM.
+    vue:   !!(W.Vue?.version || (W.__VUE__ && W.__VUE__.$root) || document.querySelector('[data-v-app],[data-server-rendered]')),
+    // Nuxt: $nuxt é o objeto real; __NUXT__ é o estado SSR.
+    nuxt:  !!(W.$nuxt || W.__NUXT__),
+    // Angular: ng.version é injetado pelo Angular runtime real; [ng-version]
+    // no DOM é marcador do compiler. Removido getAllAngularRootElements pois é
+    // injetado pelo Angular DevTools em todas as páginas.
+    angular: !!(W.ng?.version || document.querySelector('[ng-version]')),
+    svelte:  !!document.querySelector('[class*="svelte-"]'),
+    preact:  !!(W.preact?.h),
+    solid:   !!(W._$HY?.completed),
   };
   const spaDetectado = Object.entries(spa).filter(([k,v])=>v).map(([k])=>k);
   // Promover detecção mais confiável: se achou via window, garante presença na lista
@@ -533,19 +559,61 @@ function scriptDeMapeamento(opcoes) {
     });
   });
 
-  // Heurística de "este é o botão de submit principal": prioriza data-request > classe primária > texto primário > último botão do form
-  // Marca apenas UM como provavel_submit_primario para evitar ambiguidade
-  let idxSubmit = botoes.findIndex(b => b.data_request && b.provavel_primario);
-  if(idxSubmit < 0) idxSubmit = botoes.findIndex(b => b.data_request);
-  if(idxSubmit < 0) idxSubmit = botoes.findIndex(b => b.em_formulario && b.provavel_primario && !b.acao_destrutiva);
-  if(idxSubmit < 0) idxSubmit = botoes.findIndex(b => b.provavel_primario && !b.acao_destrutiva);
-  if(idxSubmit < 0) {
-    // Último botão dentro de um form, descartando ações destrutivas
-    for(let i=botoes.length-1; i>=0; i--) {
-      if(botoes[i].em_formulario && !botoes[i].acao_destrutiva) { idxSubmit = i; break; }
+  // Heurística do "submit primário": pontua cada botão e escolhe o melhor.
+  // Threshold mínimo: se ninguém atingir 30, deixa não-marcado (melhor admitir
+  // que não sabe do que chutar "Sair"/"JONATHAN" como na v1.1.0).
+  const RX_DATA_REQUEST_NAO_SUBMIT = /onLogout|onSair|onLogin|onDelete|onClose|onCancel|onRemove|onDestroy|onShow|onHide|onToggle/i;
+  const RX_TEXTO_NAO_SUBMIT = /^(sair|logout|voltar|menu|perfil|conta|ajuda|home|in[ií]cio|cancelar|fechar|×|x|ok)$/i;
+
+  function pontuarBotaoSubmit(b) {
+    // Desqualificações duras: retornam imediatamente um score muito negativo
+    if(b.acao_destrutiva) return { score: -100, razao: 'destrutivo' };
+    if(b.disabled) return { score: -100, razao: 'disabled' };
+    if(RX_TEXTO_NAO_SUBMIT.test((b.texto||'').trim())) {
+      return { score: -50, razao: `texto blacklist: "${b.texto}"` };
+    }
+    if(b.data_request && RX_DATA_REQUEST_NAO_SUBMIT.test(b.data_request)) {
+      return { score: -50, razao: `data-request blacklist: ${b.data_request}` };
+    }
+
+    let score = 0;
+    const razoes = [];
+    // Estar DENTRO de um <form> é o sinal mais forte de submit real
+    if(b.em_formulario) { score += 30; razoes.push('em form'); }
+    // type=submit em <button> ou <input> é declaração explícita
+    if(b.tipo === 'submit') { score += 20; razoes.push('type=submit'); }
+    // data-request válido (não-blacklist) indica AJAX intencional
+    if(b.data_request && !RX_DATA_REQUEST_NAO_SUBMIT.test(b.data_request)) {
+      score += 25; razoes.push(`data-request=${b.data_request}`);
+    }
+    // Classe primária OU texto primário (heurística antiga)
+    if(b.provavel_primario) { score += 15; razoes.push('classe/texto primário'); }
+    // ID nomeado costuma ser mais estável e intencional
+    if(b.id) { score += 5; razoes.push('tem id'); }
+    // Botões abaixo da dobra costumam ser submit (header tem botões em y baixo)
+    if(b.posicao_y && b.posicao_y > 200) { score += 5; razoes.push('abaixo da dobra'); }
+
+    return { score, razao: razoes.join(' + ') };
+  }
+
+  let melhorScore = -Infinity;
+  let melhorIdx = -1;
+  let melhorRazao = '';
+  for(let i = 0; i < botoes.length; i++) {
+    const { score, razao } = pontuarBotaoSubmit(botoes[i]);
+    if(score > melhorScore) {
+      melhorScore = score;
+      melhorIdx = i;
+      melhorRazao = razao;
     }
   }
-  if(idxSubmit >= 0) botoes[idxSubmit].provavel_submit_primario = true;
+  // Threshold de 30: precisa pelo menos estar dentro de um form, OU ter
+  // data-request válido + algo. Sem isso, melhor não marcar.
+  if(melhorIdx >= 0 && melhorScore >= 30) {
+    botoes[melhorIdx].provavel_submit_primario = true;
+    botoes[melhorIdx].submit_primario_razao = melhorRazao;
+    botoes[melhorIdx].submit_primario_score = melhorScore;
+  }
 
   // ── 5. Diagnóstico ─────────────────────────────────────────────────────────
   const diag = {
