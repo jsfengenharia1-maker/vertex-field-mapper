@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Vertex Field Mapper",
-  "version": "1.1.1",
-  "description": "Mapeia campos, botões e estrutura de páginas web para gerar campos.json + scripts Playwright de sites/sistemas.",
+  "version": "1.3.0",
+  "description": "Mapeia campos, botões e estrutura de páginas web para gerar campos.json + scripts Playwright do sistema Vertex.",
 
   "action": {
     "default_popup": "popup.html",
