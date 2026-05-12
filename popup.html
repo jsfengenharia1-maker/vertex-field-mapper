@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Vertex Field Mapper</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap');
+
+    :root {
+      --bg:     #0d1117; --bg2: #161b22; --bg3: #21262d;
+      --border: #30363d; --accent: #f78166; --blue: #79c0ff;
+      --green:  #56d364; --yellow: #e3b341; --purple: #b392f0;
+      --red:    #ff7b72; --text: #e6edf3; --dim: #8b949e; --r: 6px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { width: 380px; background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; font-size: 13px; }
+
+    /* HEADER */
+    header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 10px 14px; display: flex; align-items: center; gap: 9px; }
+    .logo { width: 26px; height: 26px; background: var(--accent); border-radius: 5px; display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 13px; color: #0d1117; flex-shrink: 0; }
+    .header-text h1 { font-size: 12px; font-weight: 600; }
+    .header-text p { font-size: 10px; color: var(--dim); margin-top: 1px; }
+
+    /* TABS */
+    .tabs { display: flex; background: var(--bg2); border-bottom: 1px solid var(--border); }
+    .tab { flex: 1; padding: 8px 4px; text-align: center; font-size: 11px; font-weight: 500; color: var(--dim); cursor: pointer; border-bottom: 2px solid transparent; transition: color .15s, border-color .15s; user-select: none; }
+    .tab.active { color: var(--accent); border-color: var(--accent); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* COMPONENTES */
+    section { padding: 12px 14px; display: flex; flex-direction: column; gap: 9px; }
+    .lbl { font-size: 10px; font-weight: 500; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
+    .field-group { display: flex; flex-direction: column; gap: 4px; }
+    input[type="text"], textarea.desc-input {
+      background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r);
+      color: var(--text); font-family: 'Inter', sans-serif; font-size: 12px;
+      padding: 7px 9px; width: 100%; outline: none; transition: border-color .15s;
+    }
+    input[type="text"]:focus, textarea.desc-input:focus { border-color: var(--blue); }
+    input[type="text"]::placeholder, textarea.desc-input::placeholder { color: var(--dim); }
+    textarea.desc-input { resize: vertical; min-height: 50px; max-height: 90px; line-height: 1.5; }
+    .field-row { display: flex; gap: 8px; }
+    .field-row .field-group { flex: 1; }
+
+    /* OPÇÕES */
+    .opts { display: flex; flex-direction: column; gap: 5px; }
+    .opt-row { display: flex; gap: 8px; }
+    .opt { flex: 1; display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 2px 0; }
+    .opt input[type="checkbox"] { appearance: none; width: 13px; height: 13px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg3); cursor: pointer; position: relative; flex-shrink: 0; transition: background .1s, border-color .1s; }
+    .opt input[type="checkbox"]:checked { background: var(--blue); border-color: var(--blue); }
+    .opt input[type="checkbox"]:checked::after { content: ''; position: absolute; left: 2px; top: 0px; width: 5px; height: 8px; border: 2px solid #0d1117; border-top: none; border-left: none; transform: rotate(45deg); }
+    .opt span { font-size: 11px; color: var(--text); user-select: none; }
+
+    /* BOTÕES */
+    .btn-primary { background: var(--accent); color: #0d1117; border: none; border-radius: var(--r); padding: 9px 14px; font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; transition: opacity .15s, transform .1s; }
+    .btn-primary:hover { opacity: .9; }
+    .btn-primary:active { transform: scale(.98); }
+    .btn-primary:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+    .btn-green { background: var(--bg3); border: 1px solid var(--green); border-radius: var(--r); color: var(--green); font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600; padding: 8px 14px; cursor: pointer; width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; transition: background .15s; }
+    .btn-green:hover { background: #1c2a1e; }
+    .btn-green:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-ghost { background: transparent; border: 1px solid var(--border); border-radius: var(--r); color: var(--dim); font-family: 'Inter', sans-serif; font-size: 11px; padding: 6px 14px; cursor: pointer; width: 100%; transition: color .15s, border-color .15s; }
+    .btn-ghost:hover { color: var(--text); border-color: var(--dim); }
+    .btn-danger { background: transparent; border: 1px solid var(--border); border-radius: var(--r); color: var(--dim); font-family: 'Inter', sans-serif; font-size: 11px; padding: 6px 14px; cursor: pointer; width: 100%; transition: color .15s, border-color .15s; }
+    .btn-danger:hover { color: var(--red); border-color: var(--red); }
+
+    /* STATUS */
+    .status-box { display: none; border-radius: var(--r); padding: 8px 11px; font-size: 11px; line-height: 1.6; white-space: pre-wrap; }
+    .status-box.show { display: block; }
+    .status-box.ok   { background: #1c2a1e; border: 1px solid var(--green);  color: var(--green); }
+    .status-box.erro { background: #2a1c1c; border: 1px solid var(--red);    color: var(--red); }
+    .status-box.info { background: #1a2030; border: 1px solid var(--blue);   color: var(--blue); }
+    .status-box.warn { background: #2a2518; border: 1px solid var(--yellow); color: var(--yellow); }
+
+    /* ALERTAS */
+    .alerta { border-radius: var(--r); padding: 7px 10px; font-size: 11px; line-height: 1.5; border-left: 3px solid; }
+    .alerta.aviso  { background: #2a2518; border-color: var(--yellow); color: var(--yellow); }
+    .alerta.info   { background: #1a2030; border-color: var(--blue);   color: var(--blue); }
+    .alerta.danger { background: #2a1c1c; border-color: var(--red);    color: var(--red); }
+    .alerta.ok     { background: #1c2a1e; border-color: var(--green);  color: var(--green); }
+
+    /* GNG */
+    .gng-banner { border-radius: var(--r); padding: 9px 12px; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    .gng-banner.go   { background: #1c2a1e; border: 1px solid var(--green);  color: var(--green); }
+    .gng-banner.nogo { background: #2a1c1c; border: 1px solid var(--red);    color: var(--red); }
+    .gng-banner.warn { background: #2a2518; border: 1px solid var(--yellow); color: var(--yellow); }
+
+    /* TIPO DE PÁGINA BADGE */
+    .tipo-pagina-banner {
+      border-radius: var(--r); padding: 9px 12px;
+      background: var(--bg3); border: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .tipo-icon { font-size: 18px; }
+    .tipo-info { flex: 1; }
+    .tipo-label { font-size: 12px; font-weight: 600; color: var(--text); }
+    .tipo-confianca { font-size: 10px; color: var(--dim); margin-top: 1px; }
+    .tipo-badge {
+      font-family: 'JetBrains Mono', monospace; font-size: 10px;
+      padding: 2px 8px; border-radius: 20px; border: 1px solid;
+    }
+    .tipo-badge.formulario   { color: var(--blue);   border-color: var(--blue); }
+    .tipo-badge.lista_dados  { color: var(--green);  border-color: var(--green); }
+    .tipo-badge.dashboard    { color: var(--purple); border-color: var(--purple); }
+    .tipo-badge.detalhe      { color: var(--yellow); border-color: var(--yellow); }
+    .tipo-badge.misto        { color: var(--accent); border-color: var(--accent); }
+
+    /* GRIDS DETECTADOS */
+    .grids-lista { display: flex; flex-direction: column; gap: 6px; }
+    .grid-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); padding: 9px 11px; }
+    .grid-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+    .grid-tipo-badge { font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 2px 8px; border-radius: 20px; }
+    .grid-tipo-badge.datatables  { background: #1a2030; color: var(--blue);   border: 1px solid var(--blue); }
+    .grid-tipo-badge.ag-grid     { background: #1c2a1e; color: var(--green);  border: 1px solid var(--green); }
+    .grid-tipo-badge.tabulator   { background: #2a2518; color: var(--yellow); border: 1px solid var(--yellow); }
+    .grid-tipo-badge.kendo-ui    { background: #251a30; color: var(--purple); border: 1px solid var(--purple); }
+    .grid-tipo-badge.handsontable{ background: #2a1c1c; color: var(--red);    border: 1px solid var(--red); }
+    .grid-tipo-badge.html_table  { background: var(--bg2); color: var(--dim); border: 1px solid var(--border); }
+    .grid-info { font-size: 11px; color: var(--dim); line-height: 1.6; }
+    .grid-info strong { color: var(--text); }
+
+    /* STATS */
+    .stats { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); padding: 9px 11px; display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; }
+    .stat { display: flex; flex-direction: column; gap: 2px; }
+    .stat-valor { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; color: var(--blue); }
+    .stat-label { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; }
+
+    /* BADGES */
+    .badges { display: flex; flex-wrap: wrap; gap: 4px; }
+    .badge { font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 2px 7px; border-radius: 20px; border: 1px solid; }
+    .badge.fw     { color: var(--dim);    border-color: var(--border); }
+    .badge.input  { color: var(--blue);   border-color: var(--blue); }
+    .badge.select { color: var(--yellow); border-color: var(--yellow); }
+    .badge.file   { color: var(--accent); border-color: var(--accent); }
+    .badge.grid   { color: var(--green);  border-color: var(--green); }
+
+    /* SESSÃO */
+    .sessao-header { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); padding: 10px 12px; display: flex; align-items: center; gap: 10px; }
+    .sessao-nome { flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text); font-weight: 600; }
+    .sessao-nome small { color: var(--dim); font-weight: 400; font-size: 10px; display: block; }
+    .sessao-qtd { font-family: 'JetBrains Mono', monospace; font-size: 22px; font-weight: 700; color: var(--accent); }
+    .sessao-qtd small { font-size: 10px; color: var(--dim); display: block; text-align: center; margin-top: -2px; }
+    .paginas-lista { display: flex; flex-direction: column; gap: 6px; }
+    .pagina-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); padding: 9px 11px; display: flex; align-items: flex-start; gap: 10px; }
+    .pagina-num { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: var(--accent); min-width: 20px; margin-top: 1px; }
+    .pagina-info { flex: 1; min-width: 0; }
+    .pagina-desc { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pagina-titulo { font-size: 11px; color: var(--dim); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pagina-url { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--dim); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pagina-meta { font-size: 10px; color: var(--dim); margin-top: 4px; display: flex; gap: 6px; flex-wrap: wrap; }
+    .pagina-badge { font-size: 10px; padding: 1px 6px; border-radius: 20px; font-family: 'JetBrains Mono', monospace; }
+    .pagina-badge.go   { background: #1c2a1e; color: var(--green); }
+    .pagina-badge.warn { background: #2a2518; color: var(--yellow); }
+    .pagina-badge.nogo { background: #2a1c1c; color: var(--red); }
+    .pagina-remover { background: none; border: none; color: var(--dim); cursor: pointer; font-size: 14px; padding: 0 2px; transition: color .15s; flex-shrink: 0; }
+    .pagina-remover:hover { color: var(--red); }
+    .sessao-vazia { background: var(--bg3); border: 1px dashed var(--border); border-radius: var(--r); padding: 20px; text-align: center; color: var(--dim); font-size: 12px; line-height: 1.6; }
+    .sessao-vazia strong { color: var(--text); display: block; margin-bottom: 4px; }
+    .atual-preview { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); padding: 9px 11px; }
+    .atual-titulo { font-size: 12px; font-weight: 500; color: var(--text); }
+    .atual-url { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--dim); margin-top: 2px; }
+
+    /* DIAGNÓSTICO */
+    #tab-diag { padding: 13px 14px; display: flex; flex-direction: column; gap: 10px; }
+    .diag-section { display: flex; flex-direction: column; gap: 5px; }
+    .diag-title { font-size: 10px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
+    .diag-item { display: flex; align-items: baseline; gap: 8px; font-size: 11px; line-height: 1.5; }
+    .diag-key { color: var(--dim); min-width: 110px; flex-shrink: 0; }
+    .diag-val { color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+    .diag-val.ok { color: var(--green); } .diag-val.warn { color: var(--yellow); } .diag-val.danger { color: var(--red); }
+
+    /* RESULTADO */
+    #resultado { display: none; flex-direction: column; gap: 9px; }
+    #resultado.show { display: flex; }
+
+    /* FOOTER */
+    footer { border-top: 1px solid var(--border); padding: 7px 14px; display: flex; align-items: center; justify-content: space-between; }
+    .footer-tag { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--dim); }
+    .footer-tag span { color: var(--accent); }
+    .footer-url { max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin { display: inline-block; animation: spin .7s linear infinite; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">V</div>
+  <div class="header-text">
+    <h1>Vertex Field Mapper</h1>
+    <p>Reconhecimento automático de páginas web</p>
+  </div>
+</header>
+
+<div class="tabs">
+  <div class="tab active" data-tab="sessao">Sessão</div>
+  <div class="tab" data-tab="pagina">Página única</div>
+  <div class="tab" data-tab="diagnostico">Diagnóstico</div>
+</div>
+
+<!-- ═══════════ ABA SESSÃO ═══════════ -->
+<div class="tab-content active" id="tab-sessao">
+<section>
+
+  <div class="field-row">
+    <div class="field-group">
+      <label class="lbl">Projeto</label>
+      <input type="text" id="sessao-nome" placeholder="ex: crea_mt" />
+    </div>
+  </div>
+
+  <!-- Página atual -->
+  <div class="atual-preview">
+    <span class="lbl" style="display:block;margin-bottom:4px">Página atual</span>
+    <div class="atual-titulo" id="atual-titulo">—</div>
+    <div class="atual-url" id="atual-url">—</div>
+  </div>
+
+  <!-- Descrição da página (por página) -->
+  <div class="field-group">
+    <label class="lbl">Descrição desta página</label>
+    <textarea class="desc-input" id="sessao-desc" placeholder="ex: página de acompanhamento de ARTs, formulário de novo processo, lista de protocolos..."></textarea>
+  </div>
+
+  <button class="btn-primary" id="btn-adicionar">
+    <span>＋</span> Adicionar esta página à sessão
+  </button>
+
+  <div id="sessao-status" class="status-box"></div>
+
+  <!-- Header sessão -->
+  <div id="sessao-header" style="display:none" class="sessao-header">
+    <div class="sessao-nome">
+      <small>sessão ativa</small>
+      <span id="sh-nome">—</span>
+    </div>
+    <div class="sessao-qtd">
+      <span id="sh-qtd">0</span>
+      <small>páginas</small>
+    </div>
+  </div>
+
+  <div id="paginas-lista" class="paginas-lista"></div>
+
+  <div id="sessao-vazia" class="sessao-vazia">
+    <strong>Nenhuma página na sessão</strong>
+    Navegue até a primeira página, descreva-a<br>e clique em "Adicionar esta página".
+  </div>
+
+  <div id="sessao-acoes" style="display:none; flex-direction:column; gap:6px;">
+    <button class="btn-green" id="btn-baixar-sessao">
+      ⬇ Baixar sessão (<span id="baixar-qtd">0</span> páginas)
+    </button>
+    <button class="btn-danger" id="btn-limpar-sessao">Limpar sessão</button>
+  </div>
+
+</section>
+</div>
+
+<!-- ═══════════ ABA PÁGINA ÚNICA ═══════════ -->
+<div class="tab-content" id="tab-pagina">
+<section>
+
+  <div class="field-row">
+    <div class="field-group">
+      <label class="lbl">Projeto / site</label>
+      <input type="text" id="cidade" placeholder="ex: crea_mt" />
+    </div>
+  </div>
+
+  <div class="field-group">
+    <label class="lbl">Descrição desta página</label>
+    <textarea class="desc-input" id="pagina-desc" placeholder="ex: página inicial, formulário de protocolo, relatório de ARTs..."></textarea>
+  </div>
+
+  <div class="opts">
+    <label class="lbl">Incluir no mapeamento</label>
+    <div class="opt-row">
+      <label class="opt"><input type="checkbox" id="opt-hidden" checked><span>Inputs hidden</span></label>
+      <label class="opt"><input type="checkbox" id="opt-disabled"><span>Disabled/readonly</span></label>
+    </div>
+    <div class="opt-row">
+      <label class="opt"><input type="checkbox" id="opt-cookies"><span>Cookies de sessão</span></label>
+      <label class="opt"><input type="checkbox" id="opt-ajax" checked><span>Endpoints AJAX</span></label>
+    </div>
+  </div>
+
+  <button class="btn-primary" id="btn-mapear">
+    <span>⬡</span> Mapear e reconhecer página
+  </button>
+
+  <div id="status" class="status-box"></div>
+
+  <div id="resultado">
+    <!-- Tipo de página -->
+    <div id="tipo-banner" class="tipo-pagina-banner">
+      <span class="tipo-icon" id="tipo-icon">📄</span>
+      <div class="tipo-info">
+        <div class="tipo-label" id="tipo-label">Reconhecendo...</div>
+        <div class="tipo-confianca" id="tipo-confianca"></div>
+      </div>
+      <span class="tipo-badge" id="tipo-badge">—</span>
+    </div>
+
+    <!-- Go/No-Go -->
+    <div id="gng-banner" class="gng-banner go">
+      <span id="gng-icon">✓</span>
+      <span id="gng-texto">Página mapeável</span>
+    </div>
+
+    <!-- Alertas -->
+    <div id="alertas"></div>
+
+    <!-- Stats -->
+    <div class="stats">
+      <div class="stat"><div class="stat-valor" id="total-grids">0</div><div class="stat-label">grids</div></div>
+      <div class="stat"><div class="stat-valor" id="total-campos">0</div><div class="stat-label">campos</div></div>
+      <div class="stat"><div class="stat-valor" id="total-fw">0</div><div class="stat-label">libs</div></div>
+      <div class="stat"><div class="stat-valor" id="total-avisos">0</div><div class="stat-label">avisos</div></div>
+    </div>
+
+    <!-- Frameworks detectados -->
+    <div class="badges" id="badges-fw"></div>
+
+    <!-- Grids detectados -->
+    <div id="grids-lista" class="grids-lista"></div>
+
+    <button class="btn-green" id="btn-download">⬇ Baixar campos_<span id="nome-arquivo">site</span>.json</button>
+    <button class="btn-ghost" id="btn-novo">← Novo mapeamento</button>
+  </div>
+
+</section>
+</div>
+
+<!-- ═══════════ ABA DIAGNÓSTICO ═══════════ -->
+<div class="tab-content" id="tab-diagnostico">
+  <div id="tab-diag">
+    <p style="color:var(--dim);font-size:12px;text-align:center;padding:24px 0">
+      Adicione uma página à sessão ou faça um mapeamento para ver o diagnóstico.
+    </p>
+  </div>
+</div>
+
+<footer>
+  <span class="footer-tag">Vertex <span>v4.0</span></span>
+  <span class="footer-tag footer-url" id="footer-url"></span>
+</footer>
+
+<script src="popup.js"></script>
+</body>
+</html>
