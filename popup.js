@@ -76,7 +76,7 @@ function scriptDeMapeamento(opcoes) {
 
   // ── 1. Frameworks ──────────────────────────────────────────────────────────
   const FW = {
-    'OctoberCMS':    ['data-request','eseti','october'],
+    'OctoberCMS':    ['data-request','eseti','october','oc-'],
     'Laravel':       ['laravel_session','_token'],
     'Django':        ['csrfmiddlewaretoken'],
     'WordPress':     ['wp-content','wp-includes'],
@@ -95,10 +95,36 @@ function scriptDeMapeamento(opcoes) {
     'Materialize':   ['materialize','input-field','chip'],
     'Foundation':    ['foundation','orbit','grid-x'],
   };
+  // Mínimo de assinaturas distintas pra evitar falso positivo (data-request é genérico)
+  const FW_MIN = { 'OctoberCMS': 2, 'Materialize': 2, 'Semantic UI': 2 };
   const frameworks = [];
   for(const [n,s] of Object.entries(FW)) {
-    if(s.some(sig => htmlLow.includes(sig.toLowerCase()))) frameworks.push(n);
+    const hits = s.filter(sig => htmlLow.includes(sig.toLowerCase())).length;
+    const required = FW_MIN[n] || 1;
+    if(hits >= required) frameworks.push(n);
   }
+
+  // ── 1b. Detecção de SPA via window globals (mais robusta que innerHTML) ────
+  // Só funciona quando o script roda em world:'MAIN' (vide executarScript)
+  const W = (typeof window !== 'undefined') ? window : {};
+  const spa = {
+    react:    !!(W.React || W.__REACT_DEVTOOLS_GLOBAL_HOOK__ || document.querySelector('[data-reactroot]')),
+    next:     !!(W.__NEXT_DATA__ || document.getElementById('__next')),
+    vue:      !!(W.Vue || W.__VUE__ || document.querySelector('[data-v-app]')),
+    nuxt:     !!(W.__NUXT__ || W.$nuxt),
+    angular:  !!(W.ng || W.getAllAngularRootElements),
+    svelte:   !!document.querySelector('[class*="svelte-"]'),
+    preact:   !!(W.preact),
+    solid:    !!(W._$HY),
+  };
+  const spaDetectado = Object.entries(spa).filter(([k,v])=>v).map(([k])=>k);
+  // Promover detecção mais confiável: se achou via window, garante presença na lista
+  if(spa.react   && !frameworks.includes('React'))   frameworks.push('React');
+  if(spa.vue     && !frameworks.includes('Vue.js')) frameworks.push('Vue.js');
+  if(spa.angular && !frameworks.includes('Angular')) frameworks.push('Angular');
+  if(spa.next    && !frameworks.includes('Next.js')) frameworks.push('Next.js');
+  if(spa.nuxt    && !frameworks.includes('Nuxt'))    frameworks.push('Nuxt');
+  if(spa.svelte  && !frameworks.includes('Svelte'))  frameworks.push('Svelte');
 
   // ── 2. Detecção de GRIDS ───────────────────────────────────────────────────
   const grids = [];
@@ -405,6 +431,8 @@ function scriptDeMapeamento(opcoes) {
       tipo_elemento: isAuto?'autocomplete':isDate?'datepicker':'input',
       type:tipo, name:el.name||'', id:el.id||'',
       label:getLabel(el), placeholder:el.placeholder||'',
+      aria_label: el.getAttribute('aria-label')||'',
+      data_testid: el.getAttribute('data-testid')||'',
       seletor_playwright: cnt>1?`${sel} /* ⚠ ${cnt} matches */`:sel,
       obrigatorio:el.required||false, readonly:el.readOnly||false,
       mascara:mask, is_select2:isSel2,
@@ -417,7 +445,10 @@ function scriptDeMapeamento(opcoes) {
     const isSel2=!!document.querySelector(`#s2id_${el.id},.select2-container[id*="${el.id}"]`);
     campos.push({
       tipo_elemento:'select', type:'select', name:el.name||'', id:el.id||'',
-      label:getLabel(el), seletor_playwright:getSeletor(el),
+      label:getLabel(el),
+      aria_label: el.getAttribute('aria-label')||'',
+      data_testid: el.getAttribute('data-testid')||'',
+      seletor_playwright:getSeletor(el),
       total_opcoes:el.options.length,
       opcoes:Array.from(el.options).slice(0,20).map(o=>({value:o.value,text:o.text.trim()})),
       is_select2:isSel2, seletor_select2:isSel2?`#s2id_${el.id}`:null,
@@ -428,7 +459,10 @@ function scriptDeMapeamento(opcoes) {
   document.querySelectorAll('textarea').forEach(el => {
     if(el.disabled&&!opcoes.incluirDisabled) return;
     campos.push({ tipo_elemento:'textarea', name:el.name||'', id:el.id||'',
-      label:getLabel(el), seletor_playwright:getSeletor(el) });
+      label:getLabel(el),
+      aria_label: el.getAttribute('aria-label')||'',
+      data_testid: el.getAttribute('data-testid')||'',
+      seletor_playwright:getSeletor(el) });
   });
 
   document.querySelectorAll('.pekeupload-drag-area,.pkuparea,input[type=file]').forEach(el => {
@@ -436,10 +470,82 @@ function scriptDeMapeamento(opcoes) {
     campos.push({ tipo_elemento:'upload_pekeupload',
       input_hidden_name:g?.querySelector('input[type=hidden]')?.name||'',
       label:g?.querySelector('label')?.innerText?.trim()||'',
+      aria_label: el.getAttribute('aria-label')||'',
+      data_testid: el.getAttribute('data-testid')||'',
       seletor_playwright:el.tagName==='INPUT'?`input[type=file]`:'.pkuparea',
       avisos:['POST /api/files + cookies → UUID → input hidden'],
     });
   });
+
+  // ── 4b. Botões de ação ────────────────────────────────────────────────────
+  // Gap #1 identificado na análise: sem mapeamento de botões, IA chuta seletor de submit
+  const botoes = [];
+  const RX_TEXTO_PRIMARIO = /salvar|enviar|confirmar|finalizar|protocolar|cadastrar|continuar|próximo|proximo|avançar|avancar|submit|publish|create|save|send/i;
+  const RX_TEXTO_PERIGO  = /excluir|deletar|remover|cancelar|delete|remove/i;
+  const RX_CLASSE_PRIM   = /btn-primary|primary|main-action|btn-success|btn-submit/i;
+
+  const botoesSeletor = 'button, input[type=submit], input[type=button], input[type=image], a[data-request], a.btn, [role=button]';
+  document.querySelectorAll(botoesSeletor).forEach(el => {
+    if(el.disabled && !opcoes.incluirDisabled) return;
+    // Texto: prefere innerText, depois value, depois aria-label
+    const texto = ((el.innerText||el.textContent||'').trim() || el.value || el.getAttribute('aria-label') || '').replace(/\s+/g,' ').substring(0,80);
+    // Pular botões totalmente anônimos (sem id, name, texto, data-request)
+    const dataRequest = el.getAttribute('data-request') || '';
+    if(!texto && !el.id && !el.name && !dataRequest) return;
+
+    const sel = getSeletor(el);
+    const cnt = countEl(sel);
+    const classesRaw = (typeof el.className === 'string') ? el.className : (el.getAttribute('class')||'');
+    const classes = classesRaw.split(/\s+/).filter(Boolean);
+    const isPrimaryByClass = classes.some(c => RX_CLASSE_PRIM.test(c));
+    const isPrimaryByText  = RX_TEXTO_PRIMARIO.test(texto);
+    const isPerigo         = RX_TEXTO_PERIGO.test(texto);
+    const formContexto     = el.closest('form');
+
+    const tipo = (el.tagName === 'A' || el.getAttribute('role') === 'button')
+      ? 'link_acao'
+      : ((el.type||'').toLowerCase() || el.tagName.toLowerCase());
+
+    let posY = 0;
+    try { posY = Math.round(el.getBoundingClientRect().top); } catch(_){}
+
+    const avisos = [];
+    if(cnt > 1) avisos.push(`Strict mode: ${cnt} matches — use .first() ou refine seletor`);
+    if(dataRequest) avisos.push(`OctoberCMS AJAX: data-request="${dataRequest}" — usar .click(), NUNCA form.submit()`);
+    if(isPerigo) avisos.push('Texto sugere ação destrutiva — confirmar antes de automatizar');
+    if(el.tagName === 'A' && !dataRequest) avisos.push('É um link <a> — pode causar navegação; verifique se há handler JS');
+
+    botoes.push({
+      texto, tipo,
+      seletor_playwright: cnt>1 ? `${sel} /* ⚠ ${cnt} matches */` : sel,
+      id: el.id||'', name: el.name||'',
+      classes: classes.slice(0,5),
+      aria_label: el.getAttribute('aria-label')||'',
+      data_testid: el.getAttribute('data-testid')||'',
+      data_request: dataRequest,
+      disabled: el.disabled||false,
+      em_formulario: !!formContexto,
+      form_id: formContexto?.id || '',
+      provavel_primario: isPrimaryByClass || isPrimaryByText,
+      acao_destrutiva: isPerigo,
+      posicao_y: posY,
+      avisos: avisos.length ? avisos : undefined,
+    });
+  });
+
+  // Heurística de "este é o botão de submit principal": prioriza data-request > classe primária > texto primário > último botão do form
+  // Marca apenas UM como provavel_submit_primario para evitar ambiguidade
+  let idxSubmit = botoes.findIndex(b => b.data_request && b.provavel_primario);
+  if(idxSubmit < 0) idxSubmit = botoes.findIndex(b => b.data_request);
+  if(idxSubmit < 0) idxSubmit = botoes.findIndex(b => b.em_formulario && b.provavel_primario && !b.acao_destrutiva);
+  if(idxSubmit < 0) idxSubmit = botoes.findIndex(b => b.provavel_primario && !b.acao_destrutiva);
+  if(idxSubmit < 0) {
+    // Último botão dentro de um form, descartando ações destrutivas
+    for(let i=botoes.length-1; i>=0; i--) {
+      if(botoes[i].em_formulario && !botoes[i].acao_destrutiva) { idxSubmit = i; break; }
+    }
+  }
+  if(idxSubmit >= 0) botoes[idxSubmit].provavel_submit_primario = true;
 
   // ── 5. Diagnóstico ─────────────────────────────────────────────────────────
   const diag = {
@@ -453,10 +559,21 @@ function scriptDeMapeamento(opcoes) {
     qtd_forms: document.querySelectorAll('form').length,
     tem_iframe: Array.from(document.querySelectorAll('iframe')).some(f=>f.src&&!f.src.includes('youtube')&&!f.src.includes('google')),
     strict_mode_risks: (() => {
-      const risks=[];
+      const CSRF_NAMES = ['__RequestVerificationToken','_token','csrfmiddlewaretoken','authenticity_token','_csrf','csrf_token'];
+      const risks = [];
+      const seen = new Set();
       document.querySelectorAll('input,select,textarea').forEach(el => {
-        const sel=getSeletor(el); const cnt=countEl(sel);
-        if(cnt>1) risks.push({seletor:sel,count:cnt});
+        if(el.type === 'hidden') return;                            // hidden raramente importa
+        if(CSRF_NAMES.includes(el.name)) return;                    // CSRF tokens são esperados aos pares
+        const sel = getSeletor(el);
+        if(seen.has(sel)) return;                                   // dedupe
+        if(/^(input|select|textarea)$/.test(sel)) return;           // muito genérico — sempre matcha muito
+        if(sel.length < 8) return;                                  // seletores muito curtos
+        const cnt = countEl(sel);
+        if(cnt > 1 && cnt < 100) {                                  // teto pra ignorar libs com centenas de inputs internos
+          risks.push({seletor: sel, count: cnt});
+          seen.add(sel);
+        }
       });
       return risks;
     })(),
@@ -494,25 +611,36 @@ function scriptDeMapeamento(opcoes) {
   })();
 
   // ── 9. Resumo ──────────────────────────────────────────────────────────────
+  const submitPrimarioIdx = botoes.findIndex(b => b.provavel_submit_primario);
   const resumo = {
     tipo_pagina: classificacao,
     total_grids: grids.length,
     tipos_grids: [...new Set(grids.map(g=>g.tipo))],
     total_campos_form: campos.length,
+    total_botoes: botoes.length,
+    submit_primario: submitPrimarioIdx >= 0 ? {
+      texto: botoes[submitPrimarioIdx].texto,
+      seletor: botoes[submitPrimarioIdx].seletor_playwright,
+      data_request: botoes[submitPrimarioIdx].data_request || null,
+    } : null,
     total_frameworks: frameworks.length,
-    total_avisos: campos.filter(c=>c.avisos?.length).length + diag.strict_mode_risks.length,
+    total_avisos: campos.filter(c=>c.avisos?.length).length + diag.strict_mode_risks.length + botoes.filter(b=>b.avisos?.length).length,
     go_nogo: gng,
     frameworks,
+    spa_detectado: spaDetectado.length > 0 ? spaDetectado : null,
   };
 
   return {
+    schema_version: '2.0',                              // bump por adição de botoes_acao, spa_detection, aria_label
     url: location.href,
     titulo: document.title,
     timestamp: new Date().toISOString(),
     tipo_pagina: { classificacao, confianca, motivos },
     frameworks,
+    spa_detection: spa,                                  // detalhe técnico de qual SPA framework foi encontrado
     grids,
     formulario: { detectado: campos.length>0, campos },
+    botoes_acao: botoes,                                 // NOVO — seção crítica pra geração de protocolar.py
     diagnostico: diag,
     ajax_endpoints: ajaxEndpoints,
     cookies_sessao: cookies,
@@ -528,7 +656,16 @@ async function executarScript(opcoes) {
   if(!tab?.id) throw new Error('Aba não encontrada.');
   if(tab.url?.startsWith('chrome://')||tab.url?.startsWith('edge://'))
     throw new Error('Não é possível mapear páginas internas do browser.');
-  const res = await chrome.scripting.executeScript({ target:{tabId:tab.id}, func:scriptDeMapeamento, args:[opcoes] });
+  // Hydration wait — útil pra SPAs que ainda estão renderizando
+  const waitMs = parseInt(opcoes?.waitSpaMs || 0, 10);
+  if(waitMs > 0) await new Promise(r => setTimeout(r, waitMs));
+  // world:'MAIN' permite acesso a window.React, window.__NEXT_DATA__, window.Vue, etc.
+  const res = await chrome.scripting.executeScript({
+    target:{tabId:tab.id},
+    func:scriptDeMapeamento,
+    args:[opcoes],
+    world: 'MAIN',
+  });
   const dados = res?.[0]?.result;
   if(!dados) throw new Error('Nenhum dado retornado da página.');
   return { dados, tab };
@@ -554,7 +691,8 @@ const GRID_ICONS = {
 // RENDERIZAR RESULTADO
 // ─────────────────────────────────────────────────────────────────────────────
 function renderResultado(dados, cidade) {
-  const { tipo_pagina, grids, formulario, frameworks, diagnostico, resumo } = dados;
+  const { tipo_pagina, grids, formulario, botoes_acao, frameworks, diagnostico, resumo } = dados;
+  const botoes = botoes_acao || [];
   const gng = resumo.go_nogo;
   const cfg = TIPO_CONFIG[tipo_pagina.classificacao] || TIPO_CONFIG.misto;
 
@@ -574,15 +712,20 @@ function renderResultado(dados, cidade) {
   // Alertas
   const alertasEl = $('alertas');
   alertasEl.innerHTML = '';
+  const submit = resumo.submit_primario;
   const alertDefs = [
-    [frameworks.includes('OctoberCMS'),       'aviso', '⚠ OctoberCMS: usar .click() no botão. NUNCA form.submit().'],
+    [submit,                                   'ok',    `✓ Submit primário detectado: "${submit?.texto||''}"${submit?.data_request?` (AJAX: ${submit.data_request})`:''}`],
+    [!submit && botoes.length > 0,             'aviso', `⚠ ${botoes.length} botão(ões) detectado(s) mas nenhum identificado como submit primário — revise manualmente`],
+    [!submit && botoes.length === 0 && formulario.detectado, 'danger', '⛔ Formulário sem botão de submit detectado — verificar se há AJAX programático'],
+    [resumo.spa_detectado?.length > 0,         'info',  `ℹ SPA detectada: ${(resumo.spa_detectado||[]).join(', ')} — considere "Esperar SPA (3s)" antes de mapear`],
+    [frameworks.includes('OctoberCMS'),        'aviso', '⚠ OctoberCMS: usar .click() no botão. NUNCA form.submit().'],
     [frameworks.includes('pekeupload'),        'aviso', '⚠ pekeupload: upload via /api/files + UUID.'],
     [frameworks.includes('Select2'),           'info',  'ℹ Select2: não usar select_option().'],
     [grids.some(g=>g.tipo==='tabulator'),      'info',  'ℹ Tabulator: capturar numero_antes para evitar falso positivo.'],
     [grids.some(g=>g.tipo==='ag-grid'),        'aviso', '⚠ AG Grid: virtualização — apenas linhas visíveis no DOM.'],
     [grids.some(g=>g.tipo==='handsontable'),   'aviso', '⚠ Handsontable: scroll virtual — fazer scroll para mais linhas.'],
     [diagnostico.webdriver_detectavel,         'aviso', '⚠ navigator.webdriver=true — site pode bloquear Playwright.'],
-    [diagnostico.strict_mode_risks?.length>0, 'aviso', `⚠ ${diagnostico.strict_mode_risks?.length} seletor(es) com múltiplos matches.`],
+    [diagnostico.strict_mode_risks?.length>0,  'aviso', `⚠ ${diagnostico.strict_mode_risks?.length} seletor(es) com múltiplos matches.`],
   ];
   alertDefs.forEach(([c,cls,txt]) => {
     if(!c) return;
@@ -729,17 +872,21 @@ function renderSessao(sessao) {
 // ─────────────────────────────────────────────────────────────────────────────
 function montarJsonSessao(sessao) {
   return {
+    schema_version: '2.0',
     projeto: sessao.nome,
     criado_em: sessao.criada_em,
     exportado_em: new Date().toISOString(),
     total_paginas: sessao.paginas.length,
     paginas: sessao.paginas.map((p,i) => ({
       indice: i+1,
+      schema_version: p.schema_version || '1.0',
       meta: p.meta,
       tipo_pagina: p.tipo_pagina,
       frameworks: p.frameworks,
+      spa_detection: p.spa_detection,
       grids: p.grids,
       formulario: p.formulario,
+      botoes_acao: p.botoes_acao,
       diagnostico: p.diagnostico,
       ajax_endpoints: p.ajax_endpoints,
       resumo: p.resumo,
@@ -775,7 +922,13 @@ $('btn-adicionar').addEventListener('click', async () => {
   clearStatus('sessao-status');
 
   try {
-    const {dados,tab} = await executarScript({incluirHidden:true,incluirDisabled:false,incluirCookies:false,incluirAjax:true});
+    const {dados,tab} = await executarScript({
+      incluirHidden:true,
+      incluirDisabled:false,
+      incluirCookies:false,
+      incluirAjax:true,
+      waitSpaMs: $('opt-wait-spa')?.checked ? 3000 : 0,
+    });
     let sessao=await storage.get();
     if(!sessao||sessao.nome!==nome) sessao={nome,criada_em:new Date().toISOString(),paginas:[]};
 
@@ -849,6 +1002,7 @@ $('btn-mapear').addEventListener('click', async () => {
       incluirDisabled:$('opt-disabled').checked,
       incluirCookies:$('opt-cookies').checked,
       incluirAjax:$('opt-ajax').checked,
+      waitSpaMs: $('opt-wait-spa')?.checked ? 3000 : 0,
     });
     dados.meta={descricao:desc||dados.titulo||'Página mapeada',projeto:cidade,url:dados.url,titulo:dados.titulo,capturado_em:dados.timestamp};
     dados.cidade=cidade;
