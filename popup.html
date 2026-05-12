@@ -230,6 +230,14 @@
 
   <div id="sessao-status" class="status-box"></div>
 
+  <!-- Ações da sessão: logo abaixo do "Adicionar", antes da lista -->
+  <div id="sessao-acoes" style="display:none; flex-direction:column; gap:6px;">
+    <button class="btn-green" id="btn-baixar-sessao">
+      ⬇ Baixar sessão (<span id="baixar-qtd">0</span> páginas)
+    </button>
+    <button class="btn-danger" id="btn-limpar-sessao">Limpar sessão</button>
+  </div>
+
   <!-- Header sessão -->
   <div id="sessao-header" style="display:none" class="sessao-header">
     <div class="sessao-nome">
@@ -247,13 +255,6 @@
   <div id="sessao-vazia" class="sessao-vazia">
     <strong>Nenhuma página na sessão</strong>
     Navegue até a primeira página, descreva-a<br>e clique em "Adicionar esta página".
-  </div>
-
-  <div id="sessao-acoes" style="display:none; flex-direction:column; gap:6px;">
-    <button class="btn-green" id="btn-baixar-sessao">
-      ⬇ Baixar sessão (<span id="baixar-qtd">0</span> páginas)
-    </button>
-    <button class="btn-danger" id="btn-limpar-sessao">Limpar sessão</button>
   </div>
 
 </section>
@@ -284,6 +285,9 @@
     <div class="opt-row">
       <label class="opt"><input type="checkbox" id="opt-cookies"><span>Cookies de sessão</span></label>
       <label class="opt"><input type="checkbox" id="opt-ajax" checked><span>Endpoints AJAX</span></label>
+    </div>
+    <div class="opt-row">
+      <label class="opt"><input type="checkbox" id="opt-wait-spa"><span>Esperar SPA (3s antes de mapear)</span></label>
     </div>
   </div>
 
@@ -344,7 +348,7 @@
 </div>
 
 <footer>
-  <span class="footer-tag">Vertex <span>v4.0</span></span>
+  <span class="footer-tag">Vertex <span>v4.1</span></span>
   <span class="footer-tag footer-url" id="footer-url"></span>
 </footer>
 
