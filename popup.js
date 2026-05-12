@@ -833,7 +833,11 @@ function renderSessao(sessao) {
 
   const lista = $('paginas-lista');
   lista.innerHTML='';
-  sessao.paginas.forEach((pag,idx) => {
+  // Renderiza em ordem reversa — mais recente no topo. Número exibido reflete
+  // ordem de adição (1 = primeira adicionada), e data-idx preserva o índice
+  // real no array pra remoção correta.
+  [...sessao.paginas].reverse().forEach((pag, posInvertida) => {
+    const idx = sessao.paginas.length - 1 - posInvertida;
     const gng = pag.resumo?.go_nogo;
     const tipo = pag.tipo_pagina?.classificacao || '—';
     const cfg  = TIPO_CONFIG[tipo] || TIPO_CONFIG.misto;
