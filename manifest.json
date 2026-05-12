@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Vertex Field Mapper",
   "version": "1.0.0",
-  "description": "Mapeia campos de formulários de prefeituras para gerar campos.json do sistema Vertex.",
+  "description": "Automatically maps web page fields, data grids and structure to generate automation scripts with Playwright.",
 
   "action": {
     "default_popup": "popup.html",
