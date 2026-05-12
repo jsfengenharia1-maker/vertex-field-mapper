@@ -1,0 +1,55 @@
+# Vertex Field Mapper
+
+Chrome extension that automatically maps web form fields,
+data grids and page structure for Playwright automation scripts.
+
+## What it detects
+- Page type: form | data list | dashboard | detail | mixed
+- Grids: DataTables, AG Grid, Tabulator.js, Kendo UI, Handsontable, HTML Table
+- Form fields: inputs, selects, textareas, file uploads (pekeupload)
+- Frameworks: OctoberCMS, Laravel, Django, jQuery, React, Vue, Alpine.js, Select2...
+- Go/No-Go signals: reCAPTCHA, digital certificate, gov.br login, webdriver detection
+
+## Output
+Always generates a complete JSON with:
+- `meta` — url, title, user description, project, timestamp
+- `tipo_pagina` — classification with confidence level
+- `grids` — each table with columns, selectors and ready-to-use Playwright code
+- `formulario` — all input fields with selectors
+- `diagnostico` — automation blockers and warnings
+
+## Installation
+1. Download this repository (Code → Download ZIP)
+2. Extract the zip
+3. Open Chrome → `chrome://extensions`
+4. Enable **Developer mode**
+5. Click **"Load unpacked"**
+6. Select the `vertex_field_mapper` folder
+
+## How to use
+### Single page
+1. Navigate to the target page (already logged in if needed)
+2. Click the ⬡ icon in the Chrome toolbar
+3. Type a project name and page description
+4. Click **"Map current page"**
+5. Download the JSON
+
+### Multi-page session
+1. Navigate to page 1 of the flow
+2. Type a description: "new process form - property data tab"
+3. Click **"Add this page to session"**
+4. Navigate to the next page, add description, add again
+5. Repeat for each step, tab, popup in the flow
+6. Click **"Download complete session"**
+
+## Use the JSON
+Send the downloaded JSON + an audio explaining each field
+to Claude in a new conversation to generate your automation script.
+
+## Roadmap
+- [ ] Detail mode (map display elements for monitor.py)
+- [ ] Bookmarklet version for mobile
+- [ ] AJAX request interceptor with replay examples
+
+## License
+MIT
