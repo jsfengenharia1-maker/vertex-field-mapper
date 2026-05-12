@@ -86,6 +86,28 @@
     .gng-banner.nogo { background: #2a1c1c; border: 1px solid var(--red);    color: var(--red); }
     .gng-banner.warn { background: #2a2518; border: 1px solid var(--yellow); color: var(--yellow); }
 
+    /* AÇÕES RECOMENDADAS */
+    .acoes-recomendadas { display: none; background: #2a2518; border: 1px solid var(--yellow); border-left: 3px solid var(--yellow); border-radius: var(--r); padding: 10px 12px; }
+    .acoes-titulo { font-size: 12px; font-weight: 600; color: var(--yellow); margin-bottom: 4px; }
+    .acoes-sub { font-size: 11px; color: var(--text); margin-bottom: 8px; line-height: 1.4; opacity: .85; }
+    .acao-item { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; border-top: 1px solid rgba(227,179,65,.15); }
+    .acao-item:first-of-type { border-top: none; }
+    .acao-num { width: 18px; height: 18px; flex-shrink: 0; background: var(--yellow); color: #0d1117; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; }
+    .acao-info { flex: 1; font-size: 11px; line-height: 1.4; }
+    .acao-passos { color: var(--text); }
+    .acao-passos strong { color: var(--yellow); font-weight: 600; }
+    .acao-detalhe { font-size: 10px; color: var(--dim); margin-top: 2px; }
+    .acao-detalhe code { font-family: 'JetBrains Mono', monospace; background: var(--bg3); padding: 1px 4px; border-radius: 3px; color: var(--blue); }
+    .btn-destacar {
+      width: 100%; margin-top: 8px; padding: 8px 12px;
+      background: var(--yellow); color: #0d1117;
+      border: none; border-radius: var(--r);
+      font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: opacity .15s;
+    }
+    .btn-destacar:hover { opacity: .9; }
+    .btn-destacar:disabled { opacity: .5; cursor: not-allowed; }
+
     /* TIPO DE PÁGINA BADGE */
     .tipo-pagina-banner {
       border-radius: var(--r); padding: 9px 12px;
@@ -182,6 +204,59 @@
 
     @keyframes spin { to { transform: rotate(360deg); } }
     .spin { display: inline-block; animation: spin .7s linear infinite; }
+    /* POPUP CHECKLIST — sub-itens abaixo de cada pagina-card */
+    .popup-checklist { display: flex; flex-direction: column; gap: 0; margin-top: 4px; border-top: 1px solid var(--border); }
+    .popup-checklist-header { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; padding: 5px 0 3px 30px; }
+    .popup-checklist-header.tem-pendente { color: var(--yellow); }
+    .popup-checklist-header.todos-ok     { color: var(--green); }
+    .popup-item { display: flex; align-items: center; gap: 7px; padding: 5px 6px 5px 30px; font-size: 11px; border-top: 1px solid rgba(48,54,61,.6); }
+    .popup-item--pendente .popup-item-texto { color: var(--text); }
+    .popup-item--capturado .popup-item-texto { color: var(--green); text-decoration: line-through; opacity: .7; }
+    .popup-item--pulado .popup-item-texto { color: var(--dim); text-decoration: line-through; opacity: .5; }
+    .popup-item--capturando .popup-item-texto { color: var(--blue); }
+    .popup-item-icone { font-size: 12px; flex-shrink: 0; width: 16px; text-align: center; }
+    .popup-item-texto { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .popup-item-acoes { display: flex; gap: 4px; flex-shrink: 0; }
+    .btn-capturar {
+      background: var(--yellow); color: #0d1117;
+      border: none; border-radius: 4px; padding: 3px 8px;
+      font-family: 'Inter', sans-serif; font-size: 10px; font-weight: 700;
+      cursor: pointer; transition: opacity .15s;
+    }
+    .btn-capturar:hover { opacity: .85; }
+    .btn-capturar:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-check {
+      background: var(--green); color: #0d1117;
+      border: none; border-radius: 4px; padding: 3px 8px;
+      font-family: 'Inter', sans-serif; font-size: 10px; font-weight: 700;
+      cursor: pointer; display: none; transition: opacity .15s;
+    }
+    .btn-check:hover { opacity: .85; }
+    .btn-check:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-pular {
+      background: transparent; color: var(--dim);
+      border: 1px solid var(--border); border-radius: 4px; padding: 3px 6px;
+      font-family: 'Inter', sans-serif; font-size: 10px;
+      cursor: pointer; transition: color .15s, border-color .15s;
+    }
+    .btn-pular:hover { color: var(--text); border-color: var(--dim); }
+    .popup-item-resultado { font-size: 10px; color: var(--green); margin-left: 2px; }
+    .popup-instrucao { font-size: 10px; color: var(--blue); padding: 4px 6px 4px 30px; background: rgba(121,192,255,.07); border-top: 1px solid rgba(121,192,255,.15); line-height: 1.5; }
+
+    /* Badge de status de popups no pagina-meta */
+    .popup-status-badge { font-size: 10px; padding: 1px 6px; border-radius: 20px; font-family: 'JetBrains Mono', monospace; }
+    .popup-status-badge.pendente { background: #2a2518; color: var(--yellow); }
+    .popup-status-badge.ok       { background: #1c2a1e; color: var(--green); }
+
+    /* Aviso lacunas no download */
+    .lacunas-aviso { background: #2a2518; border: 1px solid var(--yellow); border-radius: var(--r); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+    .lacunas-aviso-titulo { font-size: 12px; font-weight: 600; color: var(--yellow); }
+    .lacunas-aviso-lista { font-size: 11px; color: var(--text); line-height: 1.7; }
+    .lacunas-aviso-acoes { display: flex; gap: 6px; }
+    .btn-baixar-assim { background: var(--yellow); color: #0d1117; border: none; border-radius: var(--r); padding: 7px 12px; font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 700; cursor: pointer; flex: 1; }
+    .btn-cancelar-lacunas { background: transparent; border: 1px solid var(--border); border-radius: var(--r); color: var(--dim); padding: 7px 12px; font-family: 'Inter', sans-serif; font-size: 11px; cursor: pointer; flex: 1; }
+    .btn-cancelar-lacunas:hover { color: var(--text); border-color: var(--dim); }
+
   </style>
 </head>
 <body>
@@ -196,7 +271,6 @@
 
 <div class="tabs">
   <div class="tab active" data-tab="sessao">Sessão</div>
-  <div class="tab" data-tab="pagina">Página única</div>
   <div class="tab" data-tab="diagnostico">Diagnóstico</div>
 </div>
 
@@ -235,6 +309,7 @@
     <button class="btn-green" id="btn-baixar-sessao">
       ⬇ Baixar sessão (<span id="baixar-qtd">0</span> páginas)
     </button>
+    <button class="btn-ghost" id="btn-copiar-json-sessao">⧉ Copiar JSON</button>
     <button class="btn-danger" id="btn-limpar-sessao">Limpar sessão</button>
   </div>
 
@@ -250,89 +325,13 @@
     </div>
   </div>
 
+  <div id="lacunas-container" style="display:none"></div>
+
   <div id="paginas-lista" class="paginas-lista"></div>
 
   <div id="sessao-vazia" class="sessao-vazia">
     <strong>Nenhuma página na sessão</strong>
     Navegue até a primeira página, descreva-a<br>e clique em "Adicionar esta página".
-  </div>
-
-</section>
-</div>
-
-<!-- ═══════════ ABA PÁGINA ÚNICA ═══════════ -->
-<div class="tab-content" id="tab-pagina">
-<section>
-
-  <div class="field-row">
-    <div class="field-group">
-      <label class="lbl">Projeto / site</label>
-      <input type="text" id="cidade" placeholder="ex: crea_mt" />
-    </div>
-  </div>
-
-  <div class="field-group">
-    <label class="lbl">Descrição desta página</label>
-    <textarea class="desc-input" id="pagina-desc" placeholder="ex: página inicial, formulário de protocolo, relatório de ARTs..."></textarea>
-  </div>
-
-  <div class="opts">
-    <label class="lbl">Incluir no mapeamento</label>
-    <div class="opt-row">
-      <label class="opt"><input type="checkbox" id="opt-hidden" checked><span>Inputs hidden</span></label>
-      <label class="opt"><input type="checkbox" id="opt-disabled"><span>Disabled/readonly</span></label>
-    </div>
-    <div class="opt-row">
-      <label class="opt"><input type="checkbox" id="opt-cookies"><span>Cookies de sessão</span></label>
-      <label class="opt"><input type="checkbox" id="opt-ajax" checked><span>Endpoints AJAX</span></label>
-    </div>
-    <div class="opt-row">
-      <label class="opt"><input type="checkbox" id="opt-wait-spa"><span>Esperar SPA (3s antes de mapear)</span></label>
-    </div>
-  </div>
-
-  <button class="btn-primary" id="btn-mapear">
-    <span>⬡</span> Mapear e reconhecer página
-  </button>
-
-  <div id="status" class="status-box"></div>
-
-  <div id="resultado">
-    <!-- Tipo de página -->
-    <div id="tipo-banner" class="tipo-pagina-banner">
-      <span class="tipo-icon" id="tipo-icon">📄</span>
-      <div class="tipo-info">
-        <div class="tipo-label" id="tipo-label">Reconhecendo...</div>
-        <div class="tipo-confianca" id="tipo-confianca"></div>
-      </div>
-      <span class="tipo-badge" id="tipo-badge">—</span>
-    </div>
-
-    <!-- Go/No-Go -->
-    <div id="gng-banner" class="gng-banner go">
-      <span id="gng-icon">✓</span>
-      <span id="gng-texto">Página mapeável</span>
-    </div>
-
-    <!-- Alertas -->
-    <div id="alertas"></div>
-
-    <!-- Stats -->
-    <div class="stats">
-      <div class="stat"><div class="stat-valor" id="total-grids">0</div><div class="stat-label">grids</div></div>
-      <div class="stat"><div class="stat-valor" id="total-campos">0</div><div class="stat-label">campos</div></div>
-      <div class="stat"><div class="stat-valor" id="total-fw">0</div><div class="stat-label">libs</div></div>
-      <div class="stat"><div class="stat-valor" id="total-avisos">0</div><div class="stat-label">avisos</div></div>
-    </div>
-
-    <!-- Frameworks detectados -->
-    <div class="badges" id="badges-fw"></div>
-
-    <!-- Grids detectados -->
-    <div id="grids-lista" class="grids-lista"></div>
-
-    <button class="btn-green" id="btn-download">⬇ Baixar campos_<span id="nome-arquivo">site</span>.json</button>
-    <button class="btn-ghost" id="btn-novo">← Novo mapeamento</button>
   </div>
 
 </section>
@@ -348,7 +347,7 @@
 </div>
 
 <footer>
-  <span class="footer-tag">Vertex <span>v4.1.1</span></span>
+  <span class="footer-tag">Vertex <span>v4.3.0</span></span>
   <span class="footer-tag footer-url" id="footer-url"></span>
 </footer>
 
