@@ -7,7 +7,6 @@
 
 const STORAGE_KEY = 'vertex_sessao_v4';
 const $ = id => document.getElementById(id);
-let dadosMapeados = null;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STORAGE
@@ -70,6 +69,29 @@ function scriptDeMapeamento(opcoes) {
 
   function getMascara(el) {
     return el.dataset.mask||el.getAttribute('data-inputmask')||el.getAttribute('pattern')||'';
+  }
+
+  // ── Helper: pega TODOS os data-* de um elemento, opcionalmente excluindo
+  // chaves já capturadas em campos dedicados (ex: data-testid, data-request).
+  function getDataAttrs(el, excluir = []) {
+    const result = {};
+    if(!el || !el.attributes) return result;
+    const excluirSet = new Set(excluir);
+    for(const attr of el.attributes) {
+      if(attr.name.startsWith('data-') && !excluirSet.has(attr.name)) {
+        result[attr.name] = attr.value;
+      }
+    }
+    return result;
+  }
+
+  // ── Helper: outerHTML truncado pra contexto de debug, sem inflar JSON.
+  function getOuterHtmlTruncado(el, max = 1500) {
+    try {
+      const h = el.outerHTML || '';
+      if(h.length <= max) return h;
+      return h.substring(0, max) + ` ... (+${h.length - max} chars truncados)`;
+    } catch(_) { return ''; }
   }
 
   function countEl(sel) { try{return document.querySelectorAll(sel).length;}catch(_){return 1;} }
@@ -435,12 +457,216 @@ function scriptDeMapeamento(opcoes) {
     motivos.push('estrutura não identificada com clareza');
   }
 
-  // ── 4. Campos de formulário ────────────────────────────────────────────────
+  // ── 3.5. Helpers de detecção enriquecida ──────────────────────────────────
+
+  // Detecta se um campo é obrigatório através de múltiplas fontes.
+  // Retorna { obrigatorio: bool, fontes: [...] } — fontes ajuda a IA a entender
+  // por que aquele campo foi marcado (e a debugar se for falso positivo).
+  function detectarObrigatorio(el) {
+    const fontes = [];
+    if(el.required === true) fontes.push('attr-required-html5');
+    if(el.getAttribute('aria-required') === 'true') fontes.push('aria-required');
+    const dv = el.getAttribute('data-validation') || '';
+    if(/required|obrigat/i.test(dv)) fontes.push('data-validation');
+    // Label associado com asterisco
+    if(el.id) {
+      const lbl = document.querySelector(`label[for="${el.id}"]`);
+      if(lbl && /\*/.test(lbl.textContent || '')) fontes.push('label-asterisco');
+    }
+    // Container ancestral com classe required/field-required/is-required
+    const container = el.closest('.field,.form-group,.control,.input-group,[class*="field"]');
+    if(container) {
+      const cls = (container.className || '').toString();
+      if(/\b(required|is-required|field-required|form-group-required)\b/.test(cls)) {
+        fontes.push('classe-container-required');
+      }
+    }
+    return { obrigatorio: fontes.length > 0, fontes };
+  }
+
+  // ── 3.6. Modais e popups ──────────────────────────────────────────────────
+  // Detecta containers de modal/popup/dialog no DOM, mesmo que ocultos. Captura
+  // tipo, visibilidade, campos dentro, botões dentro, e quais botões da página
+  // ABREM cada modal (via data-target, data-bs-target, uk-toggle, href="#id").
+  //
+  // Sites de prefeitura (OctoberCMS) usam UIkit; outros usam Bootstrap. SweetAlert
+  // aparece pra confirmações. Tudo é mapeado pra a IA saber:
+  //  1. Que existem modais escondidos com forms aninhados
+  //  2. Qual botão clicar pra abrir cada modal
+  //  3. Quais campos preencher dentro
+  //  4. Se o modal já está visível no momento da captura
+
+  const SELETOR_MODAL = [
+    '.modal', '.popup', '.dialog',
+    '[role="dialog"]',
+    'dialog',                            // HTML5 nativo
+    '.uk-modal', '[uk-modal]',
+    '.sweet-alert', '.swal2-popup', '.swal2-container',
+    '.lightbox', '.overlay-modal',
+  ].join(',');
+
+  function tipoDoModal(el) {
+    const cls = (el.className || '').toString().toLowerCase();
+    if(el.hasAttribute('uk-modal') || cls.includes('uk-modal')) return 'uikit';
+    if(cls.includes('swal') || cls.includes('sweet-alert')) return 'sweetalert';
+    if(el.tagName === 'DIALOG') return 'html5_dialog';
+    if(cls.includes('modal') && (cls.includes('fade') || el.hasAttribute('data-bs-toggle') || el.hasAttribute('data-toggle'))) return 'bootstrap';
+    if(el.getAttribute('role') === 'dialog') return 'dialog';
+    return 'custom';
+  }
+
+  function elVisivel(el) {
+    if(!el) return false;
+    try {
+      if(el.offsetParent === null && el.tagName !== 'DIALOG') return false;
+      const cs = window.getComputedStyle(el);
+      if(cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) return false;
+      if(el.tagName === 'DIALOG' && !el.open) return false;
+      return true;
+    } catch(_) { return false; }
+  }
+
+  const modaisEncontrados = [];
+  const seletoresModaisVistos = new Set();   // pra dedup
+  const elementosEmModal = new WeakMap();    // el → seletor do modal pai
+
+  document.querySelectorAll(SELETOR_MODAL).forEach(modal => {
+    // Pular modais aninhados (vamos pegar só os de topo)
+    const pai = modal.parentElement?.closest(SELETOR_MODAL);
+    if(pai) return;
+    // Pular elementos genéricos demais (qualquer .dialog dentro de um framework)
+    const id = modal.id || '';
+    const cls0 = (modal.className || '').toString().split(/\s+/)[0] || '';
+    const seletorModal = id ? `#${id}` : (cls0 ? `.${cls0}` : modal.tagName.toLowerCase());
+    if(seletoresModaisVistos.has(seletorModal)) return;
+    seletoresModaisVistos.add(seletorModal);
+
+    // Título: procura header conhecido
+    const tituloEl = modal.querySelector('.modal-title, .uk-modal-title, .swal2-title, h1, h2, h3, header');
+    const titulo = tituloEl?.textContent?.trim().substring(0, 100) || '';
+
+    // Conteúdo dentro do modal
+    const formsInternos = modal.querySelectorAll('form');
+    const inputsInternos = modal.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]), select, textarea');
+    const botoesInternos = modal.querySelectorAll('button, input[type=submit], input[type=button], a.btn, [role="button"]');
+
+    const camposIds = Array.from(inputsInternos).map(i => i.id || i.name || '').filter(Boolean).slice(0, 30);
+    const botoesTextos = Array.from(botoesInternos).map(b => (b.innerText || b.value || '').trim().substring(0, 40)).filter(Boolean).slice(0, 10);
+
+    // Encontrar abridores: botões fora do modal que apontam pra ele
+    const abridores = [];
+    if(id) {
+      // Seletores que indicam "este botão abre o modal #id"
+      const seletoresAbridor = [
+        `[data-target="#${id}"]`,
+        `[data-bs-target="#${id}"]`,
+        `[uk-toggle*="${id}"]`,
+        `[data-uk-modal*="${id}"]`,
+        `[href="#${id}"]`,
+      ];
+      seletoresAbridor.forEach(sel => {
+        try {
+          document.querySelectorAll(sel).forEach(btn => {
+            if(modal.contains(btn)) return;     // não conta botões que estão DENTRO do modal
+            const texto = ((btn.innerText || btn.textContent || '').trim() || btn.value || '').substring(0, 60);
+            const idBtn = btn.id || '';
+            const dup = abridores.some(a => a.seletor === sel || a.id === idBtn);
+            if(!dup) abridores.push({ texto, seletor: sel, id: idBtn });
+          });
+        } catch(_){}
+      });
+    }
+
+    modaisEncontrados.push({
+      id,
+      seletor: seletorModal,
+      tipo: tipoDoModal(modal),
+      titulo,
+      esta_visivel: elVisivel(modal),
+      tem_form: formsInternos.length > 0,
+      total_forms_internos: formsInternos.length,
+      campos_dentro: camposIds,
+      total_campos_dentro: inputsInternos.length,
+      botoes_dentro: botoesTextos,
+      total_botoes_dentro: botoesInternos.length,
+      abridores,
+      classes: (modal.className || '').toString().split(/\s+/).filter(Boolean).slice(0, 5),
+    });
+
+    // Marcar todos os elementos dentro do modal pra que possamos referenciar depois
+    [...inputsInternos, ...botoesInternos].forEach(el => {
+      elementosEmModal.set(el, seletorModal);
+    });
+  });
+
+  // ── 3.7. Popups lazy do OctoberCMS (data-control="popup") ──────────────────
+  // O OctoberCMS implementa popups que NÃO existem no DOM até serem abertos:
+  // o botão tem data-control="popup" + data-handler="onAlgo"; quando clicado,
+  // dispara POST AJAX pro handler, que retorna o HTML do popup. Por isso o
+  // snapshot único não vê os campos internos — eles vivem só após interação.
+  //
+  // Aqui marcamos esses botões e adicionamos entries virtuais em modais_popups
+  // pra a IA (e o usuário) saberem que precisam clicar e remapear depois.
+
+  document.querySelectorAll('[data-control="popup"]').forEach(el => {
+    const handler = el.getAttribute('data-handler') || '';
+    if(!handler) return;                                    // sem handler, não conseguimos identificar o popup
+    const extraData = el.getAttribute('data-extra-data') || '';
+
+    const textoBtn = ((el.innerText || el.textContent || '').trim() || el.value || el.getAttribute('aria-label') || '').replace(/\s+/g,' ').substring(0,80);
+    const selBtn = getSeletor(el);
+    const idBtn = el.id || '';
+
+    // Chave única pro popup: handler + extra_data
+    const chave = `${handler}|${extraData}`;
+    const popupExistente = modaisEncontrados.find(m => m.lazy_loaded && (m.handler_backend + '|' + (m.extra_data||'')) === chave);
+
+    if(popupExistente) {
+      // Outro botão dispara o mesmo popup — adiciona como abridor adicional
+      if(!popupExistente.abridores.some(a => a.seletor === selBtn)) {
+        popupExistente.abridores.push({ texto: textoBtn, seletor: selBtn, id: idBtn });
+      }
+    } else {
+      // Primeiro botão a disparar este popup — cria a entry
+      const popupId = `popup_lazy_${handler}${extraData ? '_' + extraData.replace(/[^a-z0-9]/gi, '_') : ''}`;
+      modaisEncontrados.push({
+        id: popupId,
+        seletor: '(carregado dinamicamente)',
+        tipo: 'popup_lazy_octobercms',
+        titulo: '(conteúdo só existe após click)',
+        esta_visivel: false,
+        lazy_loaded: true,
+        handler_backend: handler,
+        extra_data: extraData,
+        tem_form: null,                                     // null = não sabemos ainda
+        campos_dentro: [],
+        total_campos_dentro: null,
+        botoes_dentro: [],
+        total_botoes_dentro: null,
+        abridores: [{ texto: textoBtn, seletor: selBtn, id: idBtn }],
+        classes: [],
+        aviso: 'Popup carregado via AJAX. Clique no botão abridor e adicione esta página à sessão de novo para capturar os campos internos.',
+      });
+    }
+  });
+
+  // ── 3.8. Filtrar flyouts de navegação que poluem modais_popups ───────────────
+  // Amazon e sites jQuery têm 20+ nav-flyouts sem campos — excluir se não há form,
+  // não há campos e a classe está na lista de ignorados.
+  const CLASSES_IGNORAR_MODAL = new Set(['nav-flyout', 'nav-coreflyout', 'dropdown-menu', 'nav-core-flyout']);
+  const modaisPopups = modaisEncontrados.filter(m => {
+    if(m.lazy_loaded) return true;                                  // lazy sempre mantém
+    if(m.total_campos_dentro > 0 || m.tem_form) return true;        // tem conteúdo útil
+    const temClasseIgnorada = (m.classes || []).some(c => CLASSES_IGNORAR_MODAL.has(c.toLowerCase()));
+    if(temClasseIgnorada && !m.total_campos_dentro && !m.tem_form) return false;  // flyout vazio
+    return true;
+  });
+
   const campos = [];
 
   document.querySelectorAll('input:not([type=hidden])').forEach(el => {
     const tipo=(el.type||'text').toLowerCase();
-    if(['button','submit','reset','image'].includes(tipo)) return;
+    if(['button','submit','reset','image','file'].includes(tipo)) return;  // file é tratado na seção de uploads
     if((el.disabled||el.readOnly) && !opcoes.incluirDisabled) return;
     const sel=getSeletor(el); const cnt=countEl(sel);
     const mask=getMascara(el);
@@ -453,15 +679,20 @@ function scriptDeMapeamento(opcoes) {
     if(isAuto) avisos.push('Autocomplete XHR');
     if(isDate) avisos.push('Datepicker JS');
     if(cnt>1) avisos.push(`Strict mode: ${cnt} matches`);
+    const obrig = detectarObrigatorio(el);
     campos.push({
       tipo_elemento: isAuto?'autocomplete':isDate?'datepicker':'input',
       type:tipo, name:el.name||'', id:el.id||'',
       label:getLabel(el), placeholder:el.placeholder||'',
       aria_label: el.getAttribute('aria-label')||'',
       data_testid: el.getAttribute('data-testid')||'',
+      data_atributos_extras: getDataAttrs(el, ['data-testid','data-mask','data-inputmask','data-request']),
       seletor_playwright: cnt>1?`${sel} /* ⚠ ${cnt} matches */`:sel,
-      obrigatorio:el.required||false, readonly:el.readOnly||false,
+      obrigatorio: obrig.obrigatorio,
+      obrigatorio_fontes: obrig.fontes,
+      readonly:el.readOnly||false,
       mascara:mask, is_select2:isSel2,
+      dentro_de_modal: elementosEmModal.get(el) || null,
       avisos:avisos.length?avisos:undefined,
     });
   });
@@ -469,43 +700,167 @@ function scriptDeMapeamento(opcoes) {
   document.querySelectorAll('select').forEach(el => {
     if(el.disabled&&!opcoes.incluirDisabled) return;
     const isSel2=!!document.querySelector(`#s2id_${el.id},.select2-container[id*="${el.id}"]`);
+    const obrig = detectarObrigatorio(el);
     campos.push({
       tipo_elemento:'select', type:'select', name:el.name||'', id:el.id||'',
       label:getLabel(el),
       aria_label: el.getAttribute('aria-label')||'',
       data_testid: el.getAttribute('data-testid')||'',
+      data_atributos_extras: getDataAttrs(el, ['data-testid','data-request']),
       seletor_playwright:getSeletor(el),
+      obrigatorio: obrig.obrigatorio,
+      obrigatorio_fontes: obrig.fontes,
       total_opcoes:el.options.length,
       opcoes:Array.from(el.options).slice(0,20).map(o=>({value:o.value,text:o.text.trim()})),
       is_select2:isSel2, seletor_select2:isSel2?`#s2id_${el.id}`:null,
+      dentro_de_modal: elementosEmModal.get(el) || null,
       avisos:isSel2?['Select2 — não usar select_option()']:undefined,
     });
   });
 
   document.querySelectorAll('textarea').forEach(el => {
     if(el.disabled&&!opcoes.incluirDisabled) return;
+    const obrig = detectarObrigatorio(el);
     campos.push({ tipo_elemento:'textarea', name:el.name||'', id:el.id||'',
       label:getLabel(el),
       aria_label: el.getAttribute('aria-label')||'',
       data_testid: el.getAttribute('data-testid')||'',
-      seletor_playwright:getSeletor(el) });
+      data_atributos_extras: getDataAttrs(el, ['data-testid','data-request']),
+      seletor_playwright:getSeletor(el),
+      obrigatorio: obrig.obrigatorio,
+      obrigatorio_fontes: obrig.fontes,
+      dentro_de_modal: elementosEmModal.get(el) || null,
+    });
   });
 
-  document.querySelectorAll('.pekeupload-drag-area,.pkuparea,input[type=file]').forEach(el => {
-    const g=el.closest('.field,.form-group,.control')||el.parentElement;
-    campos.push({ tipo_elemento:'upload_pekeupload',
-      input_hidden_name:g?.querySelector('input[type=hidden]')?.name||'',
-      label:g?.querySelector('label')?.innerText?.trim()||'',
-      aria_label: el.getAttribute('aria-label')||'',
-      data_testid: el.getAttribute('data-testid')||'',
-      seletor_playwright:el.tagName==='INPUT'?`input[type=file]`:'.pkuparea',
-      avisos:['POST /api/files + cookies → UUID → input hidden'],
+  // ── 4a. Uploads (pekeupload + input[type=file] genéricos) ─────────────────
+  // Estratégia: itera pelos CONTAINERS de widget (pkuparea, pekeupload-drag-area,
+  // [data-pekeupload], [data-pekeupload-attachment-field]), não pelos inputs.
+  // Isso resolve 2 problemas:
+  //   1. Captura os data-attachment-field / data-attachment-type do CONTAINER,
+  //      que dizem pra qual entidade do backend o arquivo será anexado.
+  //   2. Evita duplicação (cada widget tinha entrada do input + do .pkuparea).
+  // Para o restante de inputs[type=file] sem container pekeupload, fallback
+  // como upload simples.
+  const uploadsCapturados = new WeakSet();
+
+  // Critérios pra encontrar o container do widget pekeupload
+  const SELETOR_CONTAINER_UPLOAD = [
+    '.pkuparea',
+    '.pekeupload-drag-area',
+    '[data-pekeupload]',
+    '[data-pekeupload-attachment-field]',
+    '[data-attachment-field]',
+  ].join(',');
+
+  document.querySelectorAll(SELETOR_CONTAINER_UPLOAD).forEach(container => {
+    // Dedup: se outro container pai já foi capturado, pula
+    if(uploadsCapturados.has(container)) return;
+
+    // Procurar o <input type=file> e os hidden dentro do container.
+    // Se não houver, tentar irmãos (alguns templates colocam fora do container visual).
+    const inputFile = container.querySelector('input[type=file]') ||
+                      container.parentElement?.querySelector('input[type=file]');
+    const inputHidden = container.querySelector('input[type=hidden]') ||
+                        container.parentElement?.querySelector('input[type=hidden]');
+
+    if(inputFile) uploadsCapturados.add(inputFile);
+    uploadsCapturados.add(container);
+
+    // Captura TODOS os data-* do container E do input file (merge).
+    // Excluir os que já vão em campos dedicados pra evitar duplicação.
+    const excluir = ['data-testid', 'data-request'];
+    const dataContainer = getDataAttrs(container, excluir);
+    const dataInput = inputFile ? getDataAttrs(inputFile, excluir) : {};
+    const dataAttrs = { ...dataContainer, ...dataInput };
+
+    // Extrair campos críticos pra top-level. OctoberCMS pekeupload usa nomes
+    // variados conforme a versão/template — cobrimos os principais.
+    const attachmentField =
+      dataAttrs['data-attachment-field'] ||
+      dataAttrs['data-pekeupload-attachment-field'] ||
+      dataAttrs['data-field'] ||
+      '';
+    const attachmentType =
+      dataAttrs['data-attachment-type'] ||
+      dataAttrs['data-pekeupload-attachment-type'] ||
+      dataAttrs['data-type'] ||
+      dataAttrs['data-model'] ||
+      '';
+    const handler =
+      container.getAttribute('data-request') ||
+      dataAttrs['data-handler'] ||
+      dataAttrs['data-pekeupload-handler'] ||
+      '';
+
+    // Encontrar label associado
+    const grupo = container.closest('.field,.form-group,.control,.form-field') || container.parentElement;
+    const labelEl = grupo?.querySelector('label');
+
+    // Avisos sobre dados faltantes — sinaliza pra IA quando o widget tá incompleto
+    const avisos = ['POST /api/files + cookies → UUID → input hidden'];
+    if(!attachmentField) avisos.push('⚠ attachment_field não encontrado no DOM — handler do backend pode rejeitar');
+    if(!attachmentType)  avisos.push('⚠ attachment_type não encontrado no DOM — verificar partial OctoberCMS');
+    if(!inputHidden?.name) avisos.push('⚠ input hidden de UUID não localizado');
+
+    campos.push({
+      tipo_elemento: 'upload_pekeupload',
+      id: inputFile?.id || container.id || '',
+      input_file_id: inputFile?.id || '',
+      input_hidden_name: inputHidden?.name || '',
+      label: labelEl?.innerText?.trim() || '',
+      aria_label: (inputFile || container).getAttribute('aria-label') || '',
+      data_testid: (inputFile || container).getAttribute('data-testid') || '',
+
+      // Os campos críticos extraídos pra top-level — IA usa direto
+      attachment_field: attachmentField,
+      attachment_type: attachmentType,
+      handler_ajax: handler,
+
+      // Bag completa de data-* (container + input) pra qualquer caso não previsto
+      data_atributos: dataAttrs,
+
+      // Seletor mais específico possível: prefere id do input, depois id do container
+      seletor_playwright:
+        inputFile?.id ? `#${inputFile.id}` :
+        container.id ? `#${container.id}` :
+        'input[type=file]',
+      seletor_container: container.id ? `#${container.id}` : (container.className?`.${container.className.split(/\s+/)[0]}`:'.pkuparea'),
+
+      // outerHTML do container truncado — debug/contexto pra IA inferir o resto
+      html_widget_truncado: getOuterHtmlTruncado(container, 1500),
+
+      avisos,
+    });
+  });
+
+  // Fallback: <input type=file> sem container pekeupload identificável
+  // (uploads HTML5 nativos). Captura mais simples.
+  document.querySelectorAll('input[type=file]').forEach(el => {
+    if(uploadsCapturados.has(el)) return;
+    const grupo = el.closest('.field,.form-group,.control') || el.parentElement;
+    const labelEl = grupo?.querySelector('label');
+    const dataAttrs = getDataAttrs(el, ['data-testid']);
+
+    campos.push({
+      tipo_elemento: 'upload_simples',
+      id: el.id || '',
+      name: el.name || '',
+      label: labelEl?.innerText?.trim() || '',
+      aria_label: el.getAttribute('aria-label') || '',
+      data_testid: el.getAttribute('data-testid') || '',
+      data_atributos: dataAttrs,
+      seletor_playwright: el.id ? `#${el.id}` : 'input[type=file]',
+      accept: el.getAttribute('accept') || '',
+      multiple: el.multiple || false,
+      avisos: ['Upload HTML5 nativo — set_input_files() do Playwright'],
     });
   });
 
   // ── 4b. Botões de ação ────────────────────────────────────────────────────
   // Gap #1 identificado na análise: sem mapeamento de botões, IA chuta seletor de submit
   const botoes = [];
+  const botoesContatoExterno = new Set();  // índices de botões com href tel:/wa.me/maps — nunca são submit
   const RX_TEXTO_PRIMARIO = /salvar|enviar|confirmar|finalizar|protocolar|cadastrar|continuar|próximo|proximo|avançar|avancar|submit|publish|create|save|send/i;
   const RX_TEXTO_PERIGO  = /excluir|deletar|remover|cancelar|delete|remove/i;
   const RX_CLASSE_PRIM   = /btn-primary|primary|main-action|btn-success|btn-submit/i;
@@ -541,6 +896,35 @@ function scriptDeMapeamento(opcoes) {
     if(isPerigo) avisos.push('Texto sugere ação destrutiva — confirmar antes de automatizar');
     if(el.tagName === 'A' && !dataRequest) avisos.push('É um link <a> — pode causar navegação; verifique se há handler JS');
 
+    // Detectar se este botão abre um modal específico (data-target, data-bs-target, uk-toggle, href="#id")
+    let abreModal = null;
+    const targets = [
+      el.getAttribute('data-target'),
+      el.getAttribute('data-bs-target'),
+      el.getAttribute('uk-toggle'),
+      el.getAttribute('data-uk-modal'),
+      el.getAttribute('href'),
+    ].filter(Boolean);
+    for(const t of targets) {
+      // uk-toggle pode ser "target: #id" — extrair só o #id
+      const m = t.match(/#[\w-]+/);
+      if(m) {
+        // Confirmar que esse id realmente é um modal capturado
+        const modalAlvo = modaisEncontrados.find(mod => mod.seletor === m[0]);
+        if(modalAlvo) { abreModal = m[0]; break; }
+      }
+    }
+
+    // Detectar se este botão abre um POPUP LAZY do OctoberCMS
+    const abrePopupLazy = el.getAttribute('data-control') === 'popup';
+    const popupHandler = abrePopupLazy ? (el.getAttribute('data-handler') || '') : '';
+    const popupExtraData = abrePopupLazy ? (el.getAttribute('data-extra-data') || '') : '';
+
+    // Detectar link externo de contato (tel:, wa.me, maps) — nunca é submit primário
+    const hrefBotao = el.getAttribute('href') || '';
+    const ehHrefExternoContato = el.tagName === 'A' && /^(tel:|https?:\/\/(wa\.me|maps\.google|goo\.gl\/maps))/i.test(hrefBotao);
+    if(ehHrefExternoContato) botoesContatoExterno.add(botoes.length);  // registra índice antes do push
+
     botoes.push({
       texto, tipo,
       seletor_playwright: cnt>1 ? `${sel} /* ⚠ ${cnt} matches */` : sel,
@@ -549,12 +933,18 @@ function scriptDeMapeamento(opcoes) {
       aria_label: el.getAttribute('aria-label')||'',
       data_testid: el.getAttribute('data-testid')||'',
       data_request: dataRequest,
+      data_atributos_extras: getDataAttrs(el, ['data-testid','data-request']),
       disabled: el.disabled||false,
       em_formulario: !!formContexto,
       form_id: formContexto?.id || '',
       provavel_primario: isPrimaryByClass || isPrimaryByText,
       acao_destrutiva: isPerigo,
       posicao_y: posY,
+      abre_modal: abreModal,
+      abre_popup_lazy: abrePopupLazy,
+      popup_handler_backend: popupHandler,
+      popup_extra_data: popupExtraData,
+      dentro_de_modal: elementosEmModal.get(el) || null,
       avisos: avisos.length ? avisos : undefined,
     });
   });
@@ -563,9 +953,9 @@ function scriptDeMapeamento(opcoes) {
   // Threshold mínimo: se ninguém atingir 30, deixa não-marcado (melhor admitir
   // que não sabe do que chutar "Sair"/"JONATHAN" como na v1.1.0).
   const RX_DATA_REQUEST_NAO_SUBMIT = /onLogout|onSair|onLogin|onDelete|onClose|onCancel|onRemove|onDestroy|onShow|onHide|onToggle/i;
-  const RX_TEXTO_NAO_SUBMIT = /^(sair|logout|voltar|menu|perfil|conta|ajuda|home|in[ií]cio|cancelar|fechar|×|x|ok)$/i;
+  const RX_TEXTO_NAO_SUBMIT = /^(sair|logout|voltar|menu|perfil|conta|ajuda|home|in[ií]cio|cancelar|fechar|×|x|ok|telefone[s]?|whatsapp|chat|localiza[çc][aã]o)$/i;
 
-  function pontuarBotaoSubmit(b) {
+  function pontuarBotaoSubmit(b, idx) {
     // Desqualificações duras: retornam imediatamente um score muito negativo
     if(b.acao_destrutiva) return { score: -100, razao: 'destrutivo' };
     if(b.disabled) return { score: -100, razao: 'disabled' };
@@ -574,6 +964,10 @@ function scriptDeMapeamento(opcoes) {
     }
     if(b.data_request && RX_DATA_REQUEST_NAO_SUBMIT.test(b.data_request)) {
       return { score: -50, razao: `data-request blacklist: ${b.data_request}` };
+    }
+    // Penalizar links externos de contato (tel:, whatsapp, maps) — nunca são submit
+    if(botoesContatoExterno.has(idx)) {
+      return { score: -50, razao: 'link externo contato (tel/wa.me/maps)' };
     }
 
     let score = 0;
@@ -600,7 +994,7 @@ function scriptDeMapeamento(opcoes) {
   let melhorIdx = -1;
   let melhorRazao = '';
   for(let i = 0; i < botoes.length; i++) {
-    const { score, razao } = pontuarBotaoSubmit(botoes[i]);
+    const { score, razao } = pontuarBotaoSubmit(botoes[i], i);
     if(score > melhorScore) {
       melhorScore = score;
       melhorIdx = i;
@@ -680,6 +1074,23 @@ function scriptDeMapeamento(opcoes) {
 
   // ── 9. Resumo ──────────────────────────────────────────────────────────────
   const submitPrimarioIdx = botoes.findIndex(b => b.provavel_submit_primario);
+
+  // Ações recomendadas: o que o usuário precisa fazer pra completar a captura
+  const acoesRecomendadas = modaisPopups
+    .filter(m => m.lazy_loaded)
+    .map(m => {
+      const abridor = m.abridores?.[0] || {};
+      return {
+        tipo: 'mapear_popup_lazy',
+        prioridade: 'media',
+        abridor_texto: abridor.texto || '?',
+        abridor_seletor: abridor.seletor || '',
+        instrucao: `Clique no botão "${abridor.texto || '?'}" para abrir o popup, depois adicione esta página à sessão de novo. O scanner vai capturar os campos internos.`,
+        handler_backend: m.handler_backend,
+        extra_data: m.extra_data,
+      };
+    });
+
   const resumo = {
     tipo_pagina: classificacao,
     total_grids: grids.length,
@@ -696,23 +1107,25 @@ function scriptDeMapeamento(opcoes) {
     go_nogo: gng,
     frameworks,
     spa_detectado: spaDetectado.length > 0 ? spaDetectado : null,
+    acoes_recomendadas: acoesRecomendadas,
   };
 
   return {
-    schema_version: '2.0',                              // bump por adição de botoes_acao, spa_detection, aria_label
+    schema_version: '3.2',                              // bump v1.3.0: popups_pendentes/capturados, checklist guiado
     url: location.href,
     titulo: document.title,
     timestamp: new Date().toISOString(),
     tipo_pagina: { classificacao, confianca, motivos },
     frameworks,
-    spa_detection: spa,                                  // detalhe técnico de qual SPA framework foi encontrado
+    spa_detection: spa,
     grids,
     formulario: { detectado: campos.length>0, campos },
-    botoes_acao: botoes,                                 // NOVO — seção crítica pra geração de protocolar.py
+    botoes_acao: botoes,
+    modais_popups: modaisPopups,                          // filtrado (flyouts removidos)
     diagnostico: diag,
     ajax_endpoints: ajaxEndpoints,
     cookies_sessao: cookies,
-    resumo,
+    resumo: { ...resumo, total_modais: modaisPopups.length, total_campos_obrigatorios: campos.filter(c => c.obrigatorio).length },
   };
 }
 
@@ -740,6 +1153,163 @@ async function executarScript(opcoes) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// DESTAQUE VISUAL NA PÁGINA — para guiar o usuário a clicar em popups lazy
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Esta função roda na página alvo (world:'MAIN'). Recebe uma lista de seletores
+// e desenha overlay escurecido + outline pulsante em cada um. Inclui botão
+// flutuante "✕ Fechar destaque" pra o usuário remover quando quiser.
+function scriptDestacarBotoes(itens) {
+  // Remove qualquer destaque anterior pra evitar acumular
+  document.getElementById('vertex-overlay-destaque')?.remove();
+  document.getElementById('vertex-btn-fechar-destaque')?.remove();
+  document.getElementById('vertex-css-destaque')?.remove();
+  document.querySelectorAll('.vertex-alvo-destaque').forEach(el => el.classList.remove('vertex-alvo-destaque'));
+
+  // CSS injetado: overlay full-screen, outline pulsante nos alvos, botão flutuante
+  const css = document.createElement('style');
+  css.id = 'vertex-css-destaque';
+  css.textContent = `
+    #vertex-overlay-destaque {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,.55); z-index: 2147483640;
+      pointer-events: none;
+    }
+    .vertex-alvo-destaque {
+      position: relative !important;
+      z-index: 2147483641 !important;
+      outline: 3px solid #ff3b3b !important;
+      outline-offset: 3px !important;
+      box-shadow: 0 0 0 6px rgba(255,59,59,.35), 0 0 24px 4px rgba(255,59,59,.6) !important;
+      animation: vertex-pulse 1.2s ease-in-out infinite !important;
+      transition: none !important;
+    }
+    @keyframes vertex-pulse {
+      0%, 100% { box-shadow: 0 0 0 6px rgba(255,59,59,.35), 0 0 24px 4px rgba(255,59,59,.6); }
+      50%      { box-shadow: 0 0 0 10px rgba(255,59,59,.15), 0 0 32px 8px rgba(255,59,59,.85); }
+    }
+    .vertex-rotulo-destaque {
+      position: absolute; top: -28px; left: 0;
+      background: #ff3b3b; color: white; font-family: system-ui, sans-serif;
+      font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 4px;
+      white-space: nowrap; z-index: 2147483642;
+      box-shadow: 0 2px 6px rgba(0,0,0,.4);
+      pointer-events: none;
+    }
+    #vertex-btn-fechar-destaque {
+      position: fixed; top: 20px; right: 20px;
+      background: #21262d; color: #e6edf3;
+      border: 1px solid #ff3b3b;
+      border-radius: 6px; padding: 8px 14px;
+      font-family: system-ui, sans-serif; font-size: 13px; font-weight: 600;
+      cursor: pointer; z-index: 2147483647;
+      box-shadow: 0 4px 12px rgba(0,0,0,.4);
+      transition: background .15s;
+    }
+    #vertex-btn-fechar-destaque:hover { background: #2a1c1c; }
+    #vertex-info-destaque {
+      position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+      background: #21262d; color: #e6edf3;
+      border: 1px solid #f78166;
+      border-radius: 6px; padding: 10px 16px;
+      font-family: system-ui, sans-serif; font-size: 13px; font-weight: 500;
+      z-index: 2147483647; box-shadow: 0 4px 12px rgba(0,0,0,.4);
+      max-width: 80%; text-align: center; line-height: 1.4;
+    }
+  `;
+  document.head.appendChild(css);
+
+  // Overlay escurecido
+  const overlay = document.createElement('div');
+  overlay.id = 'vertex-overlay-destaque';
+  document.body.appendChild(overlay);
+
+  // Info flutuante no topo
+  const info = document.createElement('div');
+  info.id = 'vertex-info-destaque';
+  info.innerHTML = `<strong>📌 Vertex:</strong> clique no(s) botão(ões) destacado(s) em vermelho, depois mapeie a página de novo`;
+  document.body.appendChild(info);
+
+  // Destacar cada item
+  let encontrados = 0;
+  (itens || []).forEach((item, idx) => {
+    if(!item.seletor) return;
+    try {
+      // Pegar SÓ o primeiro elemento que bate (mesmo que strict mode tenha múltiplos)
+      const el = document.querySelector(item.seletor.replace(/\s*\/\*.*?\*\//g,'').trim());
+      if(!el) return;
+      el.classList.add('vertex-alvo-destaque');
+      // Rotulo numérico em cima do botão
+      const rotulo = document.createElement('div');
+      rotulo.className = 'vertex-rotulo-destaque';
+      rotulo.textContent = `${idx+1}. ${item.texto || 'Clique aqui'}`;
+      el.appendChild(rotulo);
+      encontrados++;
+    } catch(_) {}
+  });
+
+  // Botão de fechar
+  const btnFechar = document.createElement('button');
+  btnFechar.id = 'vertex-btn-fechar-destaque';
+  btnFechar.textContent = '✕ Fechar destaque';
+  btnFechar.onclick = () => {
+    document.getElementById('vertex-overlay-destaque')?.remove();
+    document.getElementById('vertex-info-destaque')?.remove();
+    document.getElementById('vertex-css-destaque')?.remove();
+    document.querySelectorAll('.vertex-rotulo-destaque').forEach(el => el.remove());
+    document.querySelectorAll('.vertex-alvo-destaque').forEach(el => el.classList.remove('vertex-alvo-destaque'));
+    btnFechar.remove();
+  };
+  document.body.appendChild(btnFechar);
+
+  // Auto-rolar pra o primeiro destacado se estiver fora da viewport
+  const primeiro = document.querySelector('.vertex-alvo-destaque');
+  if(primeiro) {
+    try { primeiro.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(_) {}
+  }
+
+  return { encontrados };
+}
+
+async function destacarNaPagina(acoes) {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if(!tab?.id) throw new Error('Aba não encontrada.');
+  const itens = (acoes || []).map(a => ({ seletor: a.abridor_seletor, texto: a.abridor_texto }));
+  const res = await chrome.scripting.executeScript({
+    target:{tabId:tab.id},
+    func:scriptDestacarBotoes,
+    args:[itens],
+    world: 'MAIN',
+  });
+  return res?.[0]?.result || { encontrados: 0 };
+}
+
+// Wrapper pra destacar um único popup (usado pelo fluxo guiado do checklist)
+async function destacarUmPopup(seletor, texto) {
+  return destacarNaPagina([{ abridor_seletor: seletor, abridor_texto: texto }]);
+}
+
+// Remove overlay de destaque programaticamente (sem depender do botão ✕ na página)
+function scriptRemoverDestaqueInjetado() {
+  document.getElementById('vertex-overlay-destaque')?.remove();
+  document.getElementById('vertex-info-destaque')?.remove();
+  document.getElementById('vertex-css-destaque')?.remove();
+  document.getElementById('vertex-btn-fechar-destaque')?.remove();
+  document.querySelectorAll('.vertex-rotulo-destaque').forEach(el => el.remove());
+  document.querySelectorAll('.vertex-alvo-destaque').forEach(el => el.classList.remove('vertex-alvo-destaque'));
+}
+
+async function removerDestaqueNaPagina() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if(!tab?.id) return;
+  await chrome.scripting.executeScript({
+    target:{tabId:tab.id},
+    func:scriptRemoverDestaqueInjetado,
+    world: 'MAIN',
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // TIPO DE PÁGINA — config de exibição
 // ─────────────────────────────────────────────────────────────────────────────
 const TIPO_CONFIG = {
@@ -754,94 +1324,6 @@ const GRID_ICONS = {
   datatables:   '①', 'ag-grid': '②', tabulator: '③',
   'kendo-ui':   '④', handsontable: '⑤', html_table: '⑥',
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// RENDERIZAR RESULTADO
-// ─────────────────────────────────────────────────────────────────────────────
-function renderResultado(dados, cidade) {
-  const { tipo_pagina, grids, formulario, botoes_acao, frameworks, diagnostico, resumo } = dados;
-  const botoes = botoes_acao || [];
-  const gng = resumo.go_nogo;
-  const cfg = TIPO_CONFIG[tipo_pagina.classificacao] || TIPO_CONFIG.misto;
-
-  // Tipo banner
-  $('tipo-icon').textContent   = cfg.icon;
-  $('tipo-label').textContent  = cfg.label;
-  $('tipo-confianca').textContent = `Confiança: ${tipo_pagina.confianca} — ${tipo_pagina.motivos.join(', ')}`;
-  $('tipo-badge').textContent  = tipo_pagina.classificacao;
-  $('tipo-badge').className    = `tipo-badge ${cfg.cor}`;
-
-  // GNG
-  const gngIcons = {go:'✓',warn:'⚠',nogo:'✕'};
-  $('gng-icon').textContent = gngIcons[gng.status];
-  $('gng-texto').textContent = gng.motivo;
-  $('gng-banner').className  = `gng-banner ${gng.status}`;
-
-  // Alertas
-  const alertasEl = $('alertas');
-  alertasEl.innerHTML = '';
-  const submit = resumo.submit_primario;
-  const alertDefs = [
-    [submit,                                   'ok',    `✓ Submit primário detectado: "${submit?.texto||''}"${submit?.data_request?` (AJAX: ${submit.data_request})`:''}`],
-    [!submit && botoes.length > 0,             'aviso', `⚠ ${botoes.length} botão(ões) detectado(s) mas nenhum identificado como submit primário — revise manualmente`],
-    [!submit && botoes.length === 0 && formulario.detectado, 'danger', '⛔ Formulário sem botão de submit detectado — verificar se há AJAX programático'],
-    [resumo.spa_detectado?.length > 0,         'info',  `ℹ SPA detectada: ${(resumo.spa_detectado||[]).join(', ')} — considere "Esperar SPA (3s)" antes de mapear`],
-    [frameworks.includes('OctoberCMS'),        'aviso', '⚠ OctoberCMS: usar .click() no botão. NUNCA form.submit().'],
-    [frameworks.includes('pekeupload'),        'aviso', '⚠ pekeupload: upload via /api/files + UUID.'],
-    [frameworks.includes('Select2'),           'info',  'ℹ Select2: não usar select_option().'],
-    [grids.some(g=>g.tipo==='tabulator'),      'info',  'ℹ Tabulator: capturar numero_antes para evitar falso positivo.'],
-    [grids.some(g=>g.tipo==='ag-grid'),        'aviso', '⚠ AG Grid: virtualização — apenas linhas visíveis no DOM.'],
-    [grids.some(g=>g.tipo==='handsontable'),   'aviso', '⚠ Handsontable: scroll virtual — fazer scroll para mais linhas.'],
-    [diagnostico.webdriver_detectavel,         'aviso', '⚠ navigator.webdriver=true — site pode bloquear Playwright.'],
-    [diagnostico.strict_mode_risks?.length>0,  'aviso', `⚠ ${diagnostico.strict_mode_risks?.length} seletor(es) com múltiplos matches.`],
-  ];
-  alertDefs.forEach(([c,cls,txt]) => {
-    if(!c) return;
-    const d=document.createElement('div');
-    d.className=`alerta ${cls}`; d.textContent=txt; alertasEl.appendChild(d);
-  });
-
-  // Stats
-  $('total-grids').textContent  = grids.length;
-  $('total-campos').textContent = formulario.campos.length;
-  $('total-fw').textContent     = frameworks.length;
-  $('total-avisos').textContent = resumo.total_avisos;
-  $('nome-arquivo').textContent = cidade;
-
-  // Badges frameworks
-  const badgesEl = $('badges-fw');
-  badgesEl.innerHTML = '';
-  frameworks.forEach(fw => {
-    const b=document.createElement('span');
-    b.className='badge fw'; b.textContent=fw; badgesEl.appendChild(b);
-  });
-
-  // Grids detectados
-  const gridsEl = $('grids-lista');
-  gridsEl.innerHTML = '';
-  grids.forEach(g => {
-    const card=document.createElement('div'); card.className='grid-card';
-    const icon=GRID_ICONS[g.tipo]||'⑦';
-    const nCols=g.colunas?.length||0;
-    const nLinhas=g.total_linhas_visiveis||0;
-    const temPag=g.paginacao?.detectada?'✓ paginação':'sem paginação';
-    card.innerHTML=`
-      <div class="grid-card-header">
-        <span class="grid-tipo-badge ${g.tipo}">${icon} ${g.tipo}</span>
-        ${g.id_elemento?`<span style="font-family:monospace;font-size:10px;color:var(--dim)">#${g.id_elemento}</span>`:''}
-      </div>
-      <div class="grid-info">
-        <strong>${nCols} colunas</strong> · ${nLinhas} linhas visíveis · ${temPag}<br>
-        ${g.colunas?.slice(0,4).map(c=>c.nome||c.campo||c.col_id).filter(Boolean).join(', ')||'—'}${nCols>4?` +${nCols-4}…`:''}
-      </div>
-      ${g.aviso?`<div style="font-size:10px;color:var(--yellow);margin-top:5px">⚠ ${g.aviso}</div>`:''}
-    `;
-    gridsEl.appendChild(card);
-  });
-
-  $('resultado').className='show';
-  renderDiagnostico(dados);
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RENDERIZAR DIAGNÓSTICO
@@ -906,27 +1388,103 @@ function renderSessao(sessao) {
   // real no array pra remoção correta.
   [...sessao.paginas].reverse().forEach((pag, posInvertida) => {
     const idx = sessao.paginas.length - 1 - posInvertida;
+    // Guard de migração: sessões v3.1 não têm esses campos
+    pag.popups_pendentes  = pag.popups_pendentes  || [];
+    pag.popups_capturados = pag.popups_capturados || [];
+
     const gng = pag.resumo?.go_nogo;
     const tipo = pag.tipo_pagina?.classificacao || '—';
     const cfg  = TIPO_CONFIG[tipo] || TIPO_CONFIG.misto;
     const nGrids = pag.grids?.length||0;
     const nCampos = pag.formulario?.campos?.length||0;
+
+    // Status de popups para badge no card
+    const totalPop   = pag.popups_pendentes.length;
+    const capturados = pag.popups_pendentes.filter(p=>p.status==='capturado').length;
+    const pulados    = pag.popups_pendentes.filter(p=>p.status==='pulado').length;
+    const pendentes  = pag.popups_pendentes.filter(p=>p.status==='pendente').length;
+    const temPopups  = totalPop > 0;
+    const todosConcluidos = temPopups && pendentes === 0;
+
+    let popupBadgeHtml = '';
+    if(temPopups) {
+      popupBadgeHtml = todosConcluidos
+        ? `<span class="popup-status-badge ok">✓ ${totalPop} popup${totalPop>1?'s':''}</span>`
+        : `<span class="popup-status-badge pendente">⚠ ${pendentes} popup${pendentes>1?'s':''} pendente${pendentes>1?'s':''}</span>`;
+    }
+
     const card=document.createElement('div'); card.className='pagina-card';
+    card.style.flexDirection = 'column';
+    card.style.alignItems = 'stretch';
     card.innerHTML=`
-      <div class="pagina-num">${idx+1}</div>
-      <div class="pagina-info">
-        <div class="pagina-desc">${cfg.icon} ${pag.meta?.descricao||pag.titulo||'Sem descrição'}</div>
-        <div class="pagina-titulo">${pag.titulo||''}</div>
-        <div class="pagina-url">${formatUrl(pag.url)}</div>
-        <div class="pagina-meta">
-          <span class="pagina-badge ${gng?.status||'go'}">${gng?.status==='go'?'✓':gng?.status==='nogo'?'✕':'⚠'} ${(gng?.status||'go').toUpperCase()}</span>
-          <span>${tipo}</span>
-          ${nGrids>0?`<span>🔲 ${nGrids} grid(s)</span>`:''}
-          ${nCampos>0?`<span>✏ ${nCampos} campos</span>`:''}
+      <div style="display:flex;align-items:flex-start;gap:10px">
+        <div class="pagina-num">${idx+1}</div>
+        <div class="pagina-info">
+          <div class="pagina-desc">${cfg.icon} ${pag.meta?.descricao||pag.titulo||'Sem descrição'}</div>
+          <div class="pagina-titulo">${pag.titulo||''}</div>
+          <div class="pagina-url">${formatUrl(pag.url)}</div>
+          <div class="pagina-meta">
+            <span class="pagina-badge ${gng?.status||'go'}">${gng?.status==='go'?'✓':gng?.status==='nogo'?'✕':'⚠'} ${(gng?.status||'go').toUpperCase()}</span>
+            <span>${tipo}</span>
+            ${nGrids>0?`<span>🔲 ${nGrids} grid(s)</span>`:''}
+            ${nCampos>0?`<span>✏ ${nCampos} campos</span>`:''}
+            ${popupBadgeHtml}
+          </div>
         </div>
+        <button class="pagina-remover" data-idx="${idx}" title="Remover">✕</button>
       </div>
-      <button class="pagina-remover" data-idx="${idx}" title="Remover">✕</button>
     `;
+
+    // ── Checklist de popups pendentes ────────────────────────────────────────
+    if(temPopups) {
+      const checklist = document.createElement('div');
+      checklist.className = 'popup-checklist';
+
+      const headerCl = document.createElement('div');
+      headerCl.className = `popup-checklist-header ${todosConcluidos ? 'todos-ok' : 'tem-pendente'}`;
+      headerCl.textContent = todosConcluidos
+        ? `✓ ${capturados} popup${capturados>1?'s':''} capturado${capturados>1?'s':''}${pulados>0?` · ${pulados} pulado${pulados>1?'s':''}`:''}`
+        : `📌 Popups lazy — ${pendentes} pendente${pendentes>1?'s':''} de ${totalPop}`;
+      checklist.appendChild(headerCl);
+
+      pag.popups_pendentes.forEach((popup, popIdx) => {
+        const item = document.createElement('div');
+        item.className = `popup-item popup-item--${popup.status}`;
+
+        const icone = popup.status === 'capturado' ? '☑' : popup.status === 'pulado' ? '—' : '☐';
+        const resultadoHtml = popup.status === 'capturado'
+          ? `<span class="popup-item-resultado">${popup._resultado_resumo || 'capturado'}</span>` : '';
+
+        const isModoCapturando = popup.status === 'capturando';
+        item.innerHTML = `
+          <span class="popup-item-icone">${icone}</span>
+          <span class="popup-item-texto" title="${popup.abridor_texto||''}">${popup.abridor_texto||'popup'}</span>
+          ${resultadoHtml}
+          <div class="popup-item-acoes">
+            ${popup.status==='pendente'||isModoCapturando ? `
+              <button class="btn-capturar" data-pag-idx="${idx}" data-pop-idx="${popIdx}" ${isModoCapturando?'disabled':''}>
+                ${isModoCapturando?'<span class="spin">⬡</span>':''} Capturar
+              </button>
+              <button class="btn-check" data-pag-idx="${idx}" data-pop-idx="${popIdx}" style="display:${isModoCapturando?'inline-block':'none'}">
+                ✓ Check
+              </button>
+              <button class="btn-pular" data-pag-idx="${idx}" data-pop-idx="${popIdx}" ${isModoCapturando?'disabled':''}>Pular</button>
+            ` : ''}
+          </div>
+        `;
+        checklist.appendChild(item);
+
+        if(isModoCapturando) {
+          const instrucao = document.createElement('div');
+          instrucao.className = 'popup-instrucao';
+          instrucao.innerHTML = `<strong>1.</strong> Clique no botão destacado na página &nbsp;→&nbsp; <strong>2.</strong> Aguarde o popup abrir &nbsp;→&nbsp; <strong>3.</strong> Clique <strong>✓ Check</strong> acima`;
+          checklist.appendChild(instrucao);
+        }
+      });
+
+      card.appendChild(checklist);
+    }
+
     lista.appendChild(card);
   });
 
@@ -944,7 +1502,7 @@ function renderSessao(sessao) {
 // ─────────────────────────────────────────────────────────────────────────────
 function montarJsonSessao(sessao) {
   return {
-    schema_version: '2.0',
+    schema_version: '3.2',
     projeto: sessao.nome,
     criado_em: sessao.criada_em,
     exportado_em: new Date().toISOString(),
@@ -959,9 +1517,12 @@ function montarJsonSessao(sessao) {
       grids: p.grids,
       formulario: p.formulario,
       botoes_acao: p.botoes_acao,
+      modais_popups: p.modais_popups,
       diagnostico: p.diagnostico,
       ajax_endpoints: p.ajax_endpoints,
       resumo: p.resumo,
+      popups_pendentes:  p.popups_pendentes  || [],
+      popups_capturados: p.popups_capturados || [],
     })),
   };
 }
@@ -1014,6 +1575,21 @@ $('btn-adicionar').addEventListener('click', async () => {
     };
 
     sessao.paginas.push(dados);
+
+    // ── Preencher popups_pendentes a partir de acoes_recomendadas ─────────────
+    // acoes_recomendadas já tem os lazy popups identificados no mapeamento.
+    // Transformamos em pendentes com status rastreável para o checklist da Fase 2.
+    const acoesPendentes = dados.resumo?.acoes_recomendadas || [];
+    dados.popups_pendentes = acoesPendentes.map((a, i) => ({
+      id: `popup_lazy_${a.handler_backend || 'unknown'}${a.extra_data ? '_' + a.extra_data.replace(/[^a-z0-9]/gi,'_') : ''}_${i}`,
+      handler_backend: a.handler_backend || '',
+      extra_data: a.extra_data || '',
+      abridor_texto: a.abridor_texto || '?',
+      abridor_seletor: a.abridor_seletor || '',
+      status: 'pendente',    // pendente | capturado | pulado
+    }));
+    dados.popups_capturados = [];
+
     sessao.ultima_atualizacao=new Date().toISOString();
     await storage.set(sessao);
     renderSessao(sessao);
@@ -1037,11 +1613,68 @@ $('btn-adicionar').addEventListener('click', async () => {
 $('btn-baixar-sessao').addEventListener('click', async () => {
   const sessao=await storage.get();
   if(!sessao?.paginas?.length) return;
-  const json=JSON.stringify(montarJsonSessao(sessao),null,2);
+
+  // ── Calcular lacunas (popups ainda pendentes) ─────────────────────────────
+  const lacunas = sessao.paginas.flatMap((p, i) =>
+    (p.popups_pendentes || [])
+      .filter(pp => pp.status === 'pendente')
+      .map(pp => ({ pagina: i+1, descricao: p.meta?.descricao || `Página ${i+1}`, popup: pp.abridor_texto }))
+  );
+
+  if(lacunas.length > 0) {
+    // Mostrar aviso de lacunas no container dedicado
+    const container = $('lacunas-container');
+    container.style.display = 'block';
+    container.innerHTML = `
+      <div class="lacunas-aviso">
+        <div class="lacunas-aviso-titulo">⚠ ${lacunas.length} popup${lacunas.length>1?'s':''} não capturado${lacunas.length>1?'s':''}</div>
+        <div class="lacunas-aviso-lista">${lacunas.map(l=>`Pág. ${l.pagina} — "${l.popup}"`).join('<br>')}</div>
+        <div class="lacunas-aviso-acoes">
+          <button class="btn-cancelar-lacunas" id="btn-cancelar-lacunas">Cancelar e capturar</button>
+          <button class="btn-baixar-assim" id="btn-baixar-assim">Baixar assim mesmo</button>
+        </div>
+      </div>
+    `;
+    $('btn-cancelar-lacunas').onclick = () => { container.style.display='none'; container.innerHTML=''; };
+    $('btn-baixar-assim').onclick = () => {
+      container.style.display='none'; container.innerHTML='';
+      _executarDownloadSessao(sessao, lacunas);
+    };
+    return;
+  }
+
+  _executarDownloadSessao(sessao, []);
+});
+
+function _executarDownloadSessao(sessao, lacunas) {
+  const jsonObj = montarJsonSessao(sessao);
+  // Adicionar campo validacao se houver lacunas
+  if(lacunas.length > 0) {
+    jsonObj.validacao = {
+      popups_pendentes_total: lacunas.length,
+      paginas_com_lacunas: lacunas,
+    };
+  }
+  const json = JSON.stringify(jsonObj, null, 2);
   const url=URL.createObjectURL(new Blob([json],{type:'application/json'}));
   Object.assign(document.createElement('a'),{href:url,download:`${sessao.nome}_mapeamento_${sessao.paginas.length}paginas.json`}).click();
   URL.revokeObjectURL(url);
   setStatus('sessao-status',`✓ ${sessao.nome}_mapeamento_${sessao.paginas.length}paginas.json baixado`,'ok');
+}
+
+$('btn-copiar-json-sessao').addEventListener('click', async () => {
+  const sessao=await storage.get();
+  if(!sessao?.paginas?.length) return;
+  const json=JSON.stringify(montarJsonSessao(sessao),null,2);
+  try {
+    await navigator.clipboard.writeText(json);
+    const btn=$('btn-copiar-json-sessao');
+    const original=btn.textContent;
+    btn.textContent='✓ Copiado!';
+    setTimeout(()=>{btn.textContent=original;},2000);
+  } catch(_) {
+    setStatus('sessao-status','Erro ao copiar: verifique permissões do clipboard','erro');
+  }
 });
 
 $('btn-limpar-sessao').addEventListener('click', async () => {
@@ -1059,50 +1692,128 @@ $('sessao-nome').addEventListener('input', async () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EVENTOS — PÁGINA ÚNICA
+// HANDLERS DO CHECKLIST DE POPUPS — event delegation na paginas-lista
 // ─────────────────────────────────────────────────────────────────────────────
-$('btn-mapear').addEventListener('click', async () => {
-  const cidade=slugify($('cidade').value);
-  const desc=($('pagina-desc').value||'').trim();
-  const btn=$('btn-mapear');
-  btn.disabled=true; btn.innerHTML='<span class="spin">⬡</span> Reconhecendo...';
-  $('resultado').className=''; clearStatus('status');
+$('paginas-lista').addEventListener('click', async (e) => {
+  // ── [Capturar] ─────────────────────────────────────────────────────────────
+  const btnCapturar = e.target.closest('.btn-capturar');
+  if(btnCapturar && !btnCapturar.disabled) {
+    const pagIdx = parseInt(btnCapturar.dataset.pagIdx);
+    const popIdx = parseInt(btnCapturar.dataset.popIdx);
+    const sessao = await storage.get(); if(!sessao) return;
+    const pag    = sessao.paginas[pagIdx]; if(!pag) return;
+    const popup  = pag.popups_pendentes[popIdx]; if(!popup) return;
 
-  try {
-    const {dados} = await executarScript({
-      incluirHidden:$('opt-hidden').checked,
-      incluirDisabled:$('opt-disabled').checked,
-      incluirCookies:$('opt-cookies').checked,
-      incluirAjax:$('opt-ajax').checked,
-      waitSpaMs: $('opt-wait-spa')?.checked ? 3000 : 0,
-    });
-    dados.meta={descricao:desc||dados.titulo||'Página mapeada',projeto:cidade,url:dados.url,titulo:dados.titulo,capturado_em:dados.timestamp};
-    dados.cidade=cidade;
-    dadosMapeados=dados;
+    // Marcar como "capturando" no storage e re-renderizar pra mostrar instrução
+    popup.status = 'capturando';
+    await storage.set(sessao);
+    renderSessao(sessao);
 
-    const gng=dados.resumo.go_nogo;
-    if(gng.status!=='go') setStatus('status',`${gng.status==='nogo'?'⛔':'⚠'} ${gng.motivo}`,gng.status==='nogo'?'erro':'warn');
-    renderResultado(dados,cidade);
-  } catch(err) {
-    setStatus('status',`Erro: ${err.message}`,'erro');
-  } finally {
-    btn.disabled=false; btn.innerHTML='<span>⬡</span> Mapear e reconhecer página';
+    // Destacar o botão na página
+    try {
+      await destacarUmPopup(popup.abridor_seletor, popup.abridor_texto);
+    } catch(err) {
+      setStatus('sessao-status', `Erro ao destacar: ${err.message}`, 'erro');
+      popup.status = 'pendente';
+      await storage.set(sessao);
+      renderSessao(sessao);
+    }
+    return;
+  }
+
+  // ── [✓ Check] ──────────────────────────────────────────────────────────────
+  const btnCheck = e.target.closest('.btn-check');
+  if(btnCheck && !btnCheck.disabled) {
+    const pagIdx = parseInt(btnCheck.dataset.pagIdx);
+    const popIdx = parseInt(btnCheck.dataset.popIdx);
+
+    btnCheck.disabled = true;
+    btnCheck.innerHTML = '<span class="spin">⬡</span>';
+
+    try {
+      // Rodar mapeamento completo na aba ativa (popup deve estar aberto)
+      const { dados } = await executarScript({
+        incluirHidden:true,
+        incluirDisabled:false,
+        incluirCookies:false,
+        incluirAjax:false,    // ajax endpoints já foram capturados na página mãe
+        waitSpaMs:0,
+      });
+
+      const sessao = await storage.get(); if(!sessao) return;
+      const pag    = sessao.paginas[pagIdx]; if(!pag) return;
+      const popup  = pag.popups_pendentes[popIdx]; if(!popup) return;
+
+      // Resumo curto para exibir no item capturado
+      const nCampos  = dados.formulario?.campos?.length || 0;
+      const nBotoes  = dados.botoes_acao?.length || 0;
+      popup._resultado_resumo = `${nCampos} campo${nCampos!==1?'s':''} · ${nBotoes} botão${nBotoes!==1?'ões':''}`;
+      popup.status = 'capturado';
+
+      // Salvar resultado completo em popups_capturados da página mãe
+      pag.popups_capturados = pag.popups_capturados || [];
+      pag.popups_capturados.push({
+        pai_indice:    pagIdx + 1,
+        pai_url:       pag.meta?.url || pag.url || '',
+        popup_id:      popup.id,
+        abridor_texto: popup.abridor_texto,
+        abridor_seletor: popup.abridor_seletor,
+        schema_version: '3.2',
+        meta: {
+          descricao:    `Popup: ${popup.abridor_texto}`,
+          capturado_em: new Date().toISOString(),
+        },
+        // Dados completos do mapeamento
+        tipo_pagina:  dados.tipo_pagina,
+        frameworks:   dados.frameworks,
+        grids:        dados.grids,
+        formulario:   dados.formulario,
+        botoes_acao:  dados.botoes_acao,
+        modais_popups: dados.modais_popups,
+        diagnostico:  dados.diagnostico,
+        resumo:       dados.resumo,
+      });
+
+      sessao.ultima_atualizacao = new Date().toISOString();
+      await storage.set(sessao);
+
+      // Remover overlay da página
+      await removerDestaqueNaPagina();
+
+      renderSessao(sessao);
+      setStatus('sessao-status',
+        `✓ Popup "${popup.abridor_texto}" capturado — ${popup._resultado_resumo}`, 'ok');
+
+    } catch(err) {
+      // Em caso de erro, remover overlay e voltar pra pendente
+      await removerDestaqueNaPagina().catch(()=>{});
+      const sessao = await storage.get();
+      if(sessao?.paginas?.[pagIdx]?.popups_pendentes?.[popIdx]) {
+        sessao.paginas[pagIdx].popups_pendentes[popIdx].status = 'pendente';
+        await storage.set(sessao);
+        renderSessao(sessao);
+      }
+      setStatus('sessao-status', `Erro ao capturar popup: ${err.message}`, 'erro');
+    }
+    return;
+  }
+
+  // ── [Pular] ────────────────────────────────────────────────────────────────
+  const btnPular = e.target.closest('.btn-pular');
+  if(btnPular && !btnPular.disabled) {
+    const pagIdx = parseInt(btnPular.dataset.pagIdx);
+    const popIdx = parseInt(btnPular.dataset.popIdx);
+    const sessao = await storage.get(); if(!sessao) return;
+    const popup  = sessao.paginas[pagIdx]?.popups_pendentes?.[popIdx]; if(!popup) return;
+
+    // Se estava capturando (overlay ativo), remover antes de pular
+    if(popup.status === 'capturando') {
+      await removerDestaqueNaPagina().catch(()=>{});
+    }
+
+    popup.status = 'pulado';
+    sessao.ultima_atualizacao = new Date().toISOString();
+    await storage.set(sessao);
+    renderSessao(sessao);
   }
 });
-
-$('btn-download').addEventListener('click', () => {
-  if(!dadosMapeados) return;
-  const cidade=slugify($('cidade').value||'site');
-  const url=URL.createObjectURL(new Blob([JSON.stringify(dadosMapeados,null,2)],{type:'application/json'}));
-  Object.assign(document.createElement('a'),{href:url,download:`${cidade}_campos.json`}).click();
-  URL.revokeObjectURL(url);
-  setStatus('status',`✓ ${cidade}_campos.json baixado`,'ok');
-});
-
-$('btn-novo').addEventListener('click', () => {
-  dadosMapeados=null; $('resultado').className='';
-  clearStatus('status'); $('cidade').value=''; $('pagina-desc').value='';
-  $('nome-arquivo').textContent='site'; $('cidade').focus();
-});
-
-$('cidade').addEventListener('input', () => { $('nome-arquivo').textContent=slugify($('cidade').value||'site'); });
