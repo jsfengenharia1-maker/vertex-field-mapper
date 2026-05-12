@@ -8,13 +8,13 @@
 [![Manifest V3](https://img.shields.io/badge/Manifest-V3-79c0ff?style=flat-square&logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/mv3/)
 [![Playwright](https://img.shields.io/badge/Playwright-ready-56d364?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev)
 [![License MIT](https://img.shields.io/badge/License-MIT-e3b341?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-4.0.0-b392f0?style=flat-square)](https://github.com/jsfengenharia1-maker/vertex-field-mapper/releases)
+[![Version](https://img.shields.io/badge/Version-1.1.1-b392f0?style=flat-square)](https://github.com/jsfengenharia1-maker/vertex-field-mapper/releases)
 
 **Stop spending hours inspecting DevTools.**  
 Map any web page — forms, dashboards, data grids — in seconds.  
-Get ready-to-use Playwright selectors, page classification and automation warnings automatically.
+Get ready-to-use Playwright selectors, page classification, action buttons and automation warnings automatically.
 
-[Installation](#installation) · [How to use](#how-to-use) · [Output JSON](#output-json) · [Roadmap](#roadmap)
+[Installation](#installation) · [How to use](#how-to-use) · [Output JSON](#output-json) · [Known limitations](#known-limitations) · [Roadmap](#roadmap)
 
 </div>
 
@@ -26,11 +26,32 @@ Vertex Field Mapper is a Chrome extension that analyzes any web page and generat
 
 **One click. Full reconnaissance. Ready to code.**
 
+It was built and refined while automating real-world Brazilian government permit systems (CREA-MT, Prefeitura Municipal de Sorriso) and tested against e-commerce SPAs (Mercado Livre). The detection heuristics carry that experience.
+
 ---
 
 ## What it detects
 
+### 🆕 Action buttons — with primary submit ranking
+
+The mapper now captures all buttons, submit inputs, action links (`<a data-request>`, `<a class="btn">`, `[role="button"]`) and identifies the **most likely primary submit button** using a scored heuristic:
+
+- Inside a `<form>`: +30
+- `type="submit"` explicit: +20
+- Valid `data-request` handler (not in blacklist): +25
+- Primary class or text (`btn-primary`, "Save", "Send", "Próximo", etc): +15
+- Has a stable `id`: +5
+- Below the fold (y > 200px): +5
+
+**Hard disqualifiers** (score forced negative):
+- Destructive action (`Delete`, `Remove`, `Excluir`)
+- Text blacklist (`Sair`, `Logout`, `Cancel`, `Menu`, `Profile`, `Close`, `×`)
+- `data-request` blacklist (`onLogout`, `onDelete`, `onClose`, `onCancel`, `onLogin`, `onRemove`, `onDestroy`)
+
+Each marked button carries `submit_primario_razao` (human-readable reason) and `submit_primario_score` (numeric) for full transparency. If no button passes the threshold, the field stays `null` instead of guessing — better to admit uncertainty than mark "Logout" as the primary action.
+
 ### 📊 Data grids — all major libraries
+
 | Library | Detection | Extraction |
 |---|---|---|
 | **① jQuery DataTables** | `div.dataTables_wrapper` | Columns, rows, pagination, filter |
@@ -41,6 +62,7 @@ Vertex Field Mapper is a Chrome extension that analyzes any web page and generat
 | **⑥ HTML Table** | `<table>` | Column headers, row selectors |
 
 ### 📝 Form fields
+
 - `input` — text, email, number, date, radio, checkbox, file
 - `select` — native and Select2 (with specific warning)
 - `textarea`
@@ -49,31 +71,40 @@ Vertex Field Mapper is a Chrome extension that analyzes any web page and generat
 - Datepicker JS fields
 - Numeric masks (detects ÷100 pattern common in area fields)
 
+Every field also captures `aria_label` and `data_testid` when present — critical for SPAs where IDs are auto-generated and unstable (`#_R_moipij1rie_` style).
+
 ### 🔍 Page classification
+
 Automatically classifies each page as:
 `formulario` · `lista_dados` · `dashboard` · `detalhe` · `misto`
 
 With confidence level (`alta` / `média` / `baixa`) and the reasons behind the classification.
 
 ### 🔬 Frameworks & stack detection
+
 `OctoberCMS` `Laravel` `Django` `WordPress` `AdminLTE` `jQuery`  
-`Vue.js` `React` `Angular` `Alpine.js` `Livewire`  
+`Vue.js` `React` `Angular` `Next.js` `Nuxt` `Svelte` `Alpine.js` `Livewire`  
 `Select2` `pekeupload` `Semantic UI` `Bootstrap` `Tailwind` `Materialize`
 
+SPA detection uses **real framework markers** (`window.React.version`, internal React containers, `[ng-version]`, `[data-v-app]`) instead of devtools hooks — devtools extensions inject `__REACT_DEVTOOLS_GLOBAL_HOOK__` and friends into every page you visit, which would otherwise generate false positives on every site.
+
+Ambiguous signatures (OctoberCMS, Materialize, Semantic UI) require **multiple distinct markers** to be considered detected. Prevents single-attribute matches like `data-request` from falsely flagging non-OctoberCMS sites.
+
 ### ⚠️ Go/No-Go automation signals
+
 - reCAPTCHA / hCaptcha → **NO-GO**
 - Digital certificate (e-CPF, A1, A3) → **NO-GO**
 - gov.br login (acesso.gov.br) → **WARNING**
 - `navigator.webdriver = true` → **WARNING**
 - iFrame with relevant content → **WARNING**
-- Strict mode risks (selector matching multiple elements) → **WARNING**
+- Strict mode risks (selector matching multiple elements) → **WARNING** (filtered: CSRF tokens and generic selectors are excluded automatically)
 - CSRF token, PHP session, JWT localStorage → **INFO**
 
 ---
 
 ## Installation
 
-1. **Download** — click `Code → Download ZIP` on this page
+1. **Download** — click `Code → Download ZIP` on this page, or grab the latest release ZIP
 2. **Extract** the zip on your computer
 3. Open Chrome and go to `chrome://extensions`
 4. Enable **Developer mode** (top right toggle)
@@ -89,7 +120,7 @@ With confidence level (`alta` / `média` / `baixa`) and the reasons behind the c
 
 ### Multi-page session *(recommended for complete flows)*
 
-The session persists even when you close the popup and navigate between pages.
+The session persists even when you close the popup and navigate between pages. Most recent page appears at the top of the list.
 
 ```
 1. Open the extension → "Session" tab
@@ -108,24 +139,28 @@ The session persists even when you close the popup and navigate between pages.
 1. Navigate to the target page (already logged in if needed)
 2. Click the ⬡ icon
 3. Type a project name and page description
-4. Click "Map and recognize page"
-5. Download the JSON
+4. (Optional) Check "Wait SPA (3s before mapping)" if the page is a SPA still hydrating
+5. Click "Map and recognize page"
+6. Download the JSON
 ```
+
+The **"Wait SPA"** option is useful for React/Vue/Angular apps that finish rendering after initial load. Without it, the mapper may run before the framework finishes building the DOM.
 
 ---
 
 ## Output JSON
 
-Every page always generates a complete, structured JSON:
+Every page generates a complete, structured JSON. Schema version is included at the top so consumers can adapt to format changes.
 
 ```json
 {
+  "schema_version": "2.0",
   "meta": {
     "descricao": "process tracking page",
     "projeto":   "crea_mt",
     "url":       "https://...",
     "titulo":    "ART Tracking — CREA",
-    "capturado_em": "2026-05-11T..."
+    "capturado_em": "2026-05-12T..."
   },
   "tipo_pagina": {
     "classificacao": "lista_dados",
@@ -133,27 +168,88 @@ Every page always generates a complete, structured JSON:
     "motivos": ["2 grids detected", "no significant input form"]
   },
   "frameworks": ["jQuery", "DataTables", "Bootstrap", "AdminLTE"],
+  "spa_detection": {
+    "react": false, "next": false, "vue": false,
+    "nuxt": false, "angular": false, "svelte": false
+  },
   "grids": [
     {
       "tipo": "datatables",
       "colunas": [
-        { "indice": 1, "nome": "ART Number", "seletor_celula": "#table tbody tr td:nth-child(1)" },
-        { "indice": 2, "nome": "Professional", "seletor_celula": "#table tbody tr td:nth-child(2)" }
+        { "indice": 1, "nome": "ART Number", "seletor_celula": "#table tbody tr td:nth-child(1)" }
       ],
-      "total_linhas_visiveis": 15,
-      "seletor_linha": "#table tbody tr",
-      "paginacao": { "detectada": true, "seletor_proxima": "a.paginate_button.next" },
       "playwright": {
-        "iterar_linhas": "linhas = page.locator('#table tbody tr')\nfor i in range(linhas.count()):\n    linha = linhas.nth(i)\n    art_number = linha.locator('td:nth-child(1)').inner_text().strip()",
-        "proxima_pagina": "page.locator('a.paginate_button.next').click()\npage.wait_for_timeout(1500)"
+        "iterar_linhas": "linhas = page.locator('#table tbody tr')\nfor i in range(linhas.count()):\n    linha = linhas.nth(i)\n    art_number = linha.locator('td:nth-child(1)').inner_text().strip()"
       }
     }
   ],
-  "formulario": { "detectado": false, "campos": [] },
-  "diagnostico": { "go_nogo": { "status": "go", "motivo": "Page appears automatable" } },
-  "resumo": { "tipo_pagina": "lista_dados", "total_grids": 1, "total_campos_form": 0 }
+  "formulario": {
+    "detectado": true,
+    "campos": [
+      {
+        "tipo_elemento": "input",
+        "type": "text",
+        "name": "nome",
+        "label": "Nome",
+        "aria_label": "Nome completo do cliente",
+        "data_testid": "name-input",
+        "seletor_playwright": "#nome",
+        "obrigatorio": true
+      }
+    ]
+  },
+  "botoes_acao": [
+    {
+      "texto": "Salvar Protocolo",
+      "tipo": "submit",
+      "seletor_playwright": "#btnSalvar",
+      "id": "btnSalvar",
+      "data_request": "onSave",
+      "em_formulario": true,
+      "provavel_primario": true,
+      "provavel_submit_primario": true,
+      "submit_primario_score": 75,
+      "submit_primario_razao": "em form + type=submit + data-request=onSave + classe/texto primário + tem id"
+    }
+  ],
+  "resumo": {
+    "submit_primario": {
+      "texto": "Salvar Protocolo",
+      "seletor": "#btnSalvar",
+      "data_request": "onSave"
+    },
+    "spa_detectado": null
+  }
 }
 ```
+
+---
+
+## Known limitations
+
+Vertex Field Mapper was calibrated against Brazilian government portals (OctoberCMS, ASP.NET MVC) and validated against one major SPA (Mercado Livre). The following limitations are known and documented honestly — if your use case hits one of them, please open an issue with the URL and JSON attached.
+
+### Submit detection
+- **Pages without a real submit form** (e.g., e-commerce nav-only pages) may mark a search button or promotional link as primary submit. The threshold of 30 lets borderline cases through.
+- **Search forms** (single input + submit button) currently pass the same threshold as data-entry forms. A search button can be flagged as primary submit. Workaround: read the `submit_primario_score` and `submit_primario_razao` to evaluate quality.
+- **Navigation dropdowns inside `<form>` elements** (common with user menus) may pass the form-membership check. Workaround: if `submit_primario_score == 30` and the text is a user name or generic word, treat as uncertain.
+
+### Field labels
+- When multiple fields share a containing element (common with grouped selects in OctoberCMS), all may receive the same label. Fix planned, not yet implemented.
+
+### Framework / DOM coverage
+- **Shadow DOM**: not supported. Web Components (LitElement, Stencil) are invisible to the mapper.
+- **iframes**: detected (with warning) but the mapper does not descend into them.
+- **Mobile viewports**: extension runs on Chrome desktop only. Bookmarklet version planned.
+- **WebSocket-based interactions**: not captured.
+
+### SPA support
+- React/Vue/Angular/Next/Nuxt/Svelte are detected via real framework markers. SPAs that hydrate after page load may need the **"Wait SPA (3s)"** option enabled.
+- Frameworks with rendering delays beyond 3s require manual wait via DevTools before mapping.
+- SPA-generated selectors (`#_R_moipij1rie_` style) are captured as-is but warned about — prefer `data-testid` or `aria-label` based selectors when available.
+
+### Locale
+- Primary submit text heuristic is calibrated for Portuguese and English (`Salvar`, `Enviar`, `Próximo`, `Save`, `Send`, `Submit`, `Continue`, etc). Spanish, French, German and other locales may benefit from expanding the regex in `popup.js`. PRs welcome.
 
 ---
 
@@ -171,7 +267,7 @@ Here is how I do this process manually:
 - I click Save and capture the process number from the list"
 ```
 
-The AI generates the complete `protocolar.py` or `monitor.py` with selectors already mapped.
+The AI generates the complete `protocolar.py` or `monitor.py` with selectors already mapped. The `botoes_acao` section and `submit_primario` summary tell the AI exactly which button to click — no more guessing.
 
 ---
 
@@ -188,7 +284,9 @@ Every mapping also shows a full diagnostic panel:
 | CSRF token | Playwright preserves automatically |
 | PHP session | Check session duration |
 | iFrame | Use `frame.locator()` instead of `page.locator()` |
-| Strict mode risks | Selectors matching multiple elements — use `.first` or `.nth()` |
+| Strict mode risks | Selectors matching multiple elements (CSRF tokens and generic selectors are pre-filtered) |
+| Primary submit | Identified button + reason + score |
+| SPA detected | Which framework + recommendation to enable "Wait SPA" |
 
 ---
 
@@ -199,6 +297,14 @@ Every mapping also shows a full diagnostic panel:
 - [x] Multi-page session with persistence
 - [x] Go/No-Go signals
 - [x] Ready-to-use Playwright code per grid
+- [x] **Action buttons capture with primary submit ranking** *(v1.1.0+)*
+- [x] **`aria_label` and `data_testid` capture for SPA stability** *(v1.1.0+)*
+- [x] **SPA detection via real framework markers** *(v1.1.0+)*
+- [x] **Schema version field** for forward compatibility *(v1.1.0+)*
+- [x] **Strict mode risks cleanup** (CSRF tokens and bare selectors filtered) *(v1.1.0+)*
+- [x] **Submit primary heuristic with scoring + blacklists** *(v1.1.1)*
+- [x] **Framework detection requires real markers** (no devtools hook false positives) *(v1.1.1)*
+- [ ] Refine submit primary threshold (eliminate nav/search false positives)
 - [ ] Detail mode — map display elements for `monitor.py` generation
 - [ ] Bookmarklet version for mobile browsers
 - [ ] AJAX interceptor with request replay examples
@@ -210,14 +316,16 @@ Every mapping also shows a full diagnostic panel:
 
 This extension was built from real-world experience automating Brazilian government permit systems. Common pitfalls it helps you avoid:
 
-- **`form.submit()` vs `.click()`** — OctoberCMS `data-request` handlers require a real button click, never `form.submit()`
-- **Tabulator false positive** — always capture state before submit, compare after; if equal = silent failure
-- **Numeric masks** — area fields often divide by 100 automatically (type `6000` = `60.00 m²`)
-- **Select2** — `select_option()` doesn't work; click the container, filter, click the option
-- **pekeupload** — POST to `/api/files` with session cookies, get UUID, place in hidden input
-- **Playwright strict mode** — one selector matching two elements throws an exception; use `.first` or `.nth()`
-- **AG Grid virtualization** — only visible rows are in the DOM; scroll to load more
-- **Playwright browser path** — install browsers for the exact user running the service, not root
+- **`form.submit()` vs `.click()`** — OctoberCMS `data-request` handlers require a real button click, never `form.submit()`. The `data_request` field on each button tells you which.
+- **Submit primary detection beats guessing** — A page with 20 `<a data-request>` links and one real "Create" button needs heuristics, not luck. The scored ranking + blacklists give a defensible choice (or admit uncertainty).
+- **Devtools extensions pollute window globals** — Detecting React via `__REACT_DEVTOOLS_GLOBAL_HOOK__` will give false positives on every site. Use `window.React.version` or internal containers instead.
+- **Tabulator false positive** — always capture state before submit, compare after; if equal = silent failure.
+- **Numeric masks** — area fields often divide by 100 automatically (type `6000` = `60.00 m²`).
+- **Select2** — `select_option()` doesn't work; click the container, filter, click the option.
+- **pekeupload** — POST to `/api/files` with session cookies, get UUID, place in hidden input.
+- **Playwright strict mode** — one selector matching two elements throws an exception; use `.first` or `.nth()`. CSRF tokens trigger this normally and are filtered from the warnings.
+- **AG Grid virtualization** — only visible rows are in the DOM; scroll to load more.
+- **Playwright browser path** — install browsers for the exact user running the service, not root.
 
 ---
 
