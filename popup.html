@@ -247,6 +247,23 @@
     .popup-status-badge { font-size: 10px; padding: 1px 6px; border-radius: 20px; font-family: 'JetBrains Mono', monospace; }
     .popup-status-badge.pendente { background: #2a2518; color: var(--yellow); }
     .popup-status-badge.ok       { background: #1c2a1e; color: var(--green); }
+    /* v1.6.1 — Feature D9.4: aviso amarelo de autocomplete remoto */
+    .autocomplete-aviso {
+      background: rgba(243,179,65,.08);
+      border: 1px solid rgba(243,179,65,.3);
+      border-radius: 6px;
+      padding: 10px;
+      margin: 8px 0 4px;
+      font-size: 11px;
+    }
+    .ac-titulo { font-weight: 600; color: var(--yellow); margin-bottom: 6px; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+    .autocomplete-aviso .ac-detalhe { display: block; margin: 4px 0; padding: 4px 0; border-top: 1px dashed rgba(243,179,65,.2); }
+    .autocomplete-aviso .ac-detalhe:first-of-type { border-top: none; padding-top: 0; }
+    .autocomplete-aviso .ac-detalhe span { display: block; margin: 2px 0; color: var(--muted); }
+    .autocomplete-aviso .ac-detalhe strong { color: var(--fg); }
+    .autocomplete-aviso code { background: rgba(0,0,0,.25); padding: 1px 4px; border-radius: 3px; font-size: 10px; color: var(--fg); word-break: break-all; }
+    .autocomplete-aviso .ac-contador { font-family: 'JetBrains Mono', monospace; color: var(--yellow) !important; }
+    .ac-instrucao { margin-top: 8px; padding-top: 8px; border-top: 1px dashed rgba(243,179,65,.2); color: var(--muted); line-height: 1.4; }
 
     /* Aviso lacunas no download */
     .lacunas-aviso { background: #2a2518; border: 1px solid var(--yellow); border-radius: var(--r); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
@@ -256,6 +273,145 @@
     .btn-baixar-assim { background: var(--yellow); color: #0d1117; border: none; border-radius: var(--r); padding: 7px 12px; font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 700; cursor: pointer; flex: 1; }
     .btn-cancelar-lacunas { background: transparent; border: 1px solid var(--border); border-radius: var(--r); color: var(--dim); padding: 7px 12px; font-family: 'Inter', sans-serif; font-size: 11px; cursor: pointer; flex: 1; }
     .btn-cancelar-lacunas:hover { color: var(--text); border-color: var(--dim); }
+
+    /* v1.4.2 — CAPTURA PRIORITÁRIA: bloco fixo no topo da aba Sessão quando
+       há popups pendentes. Ponto de entrada principal para o fluxo de captura.
+       v1.4.3 — Layout vertical: cada elemento em linha própria, nome sem
+       truncar, botões com largura total. */
+    .captura-prioritaria {
+      background: #1e1a10;
+      border: 1px solid var(--yellow);
+      border-radius: var(--r);
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .captura-prioritaria-titulo {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--yellow);
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+    /* Nome do popup: linha inteira, quebra de linha permitida, sem truncar */
+    .captura-prioritaria-popup-nome {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1.4;
+      word-break: break-word;
+      white-space: normal;
+    }
+    .captura-prioritaria-instrucao {
+      font-size: 12px;
+      color: var(--blue);
+      padding: 2px 0;
+      line-height: 1.4;
+    }
+    /* Botão [▶ Capturar] — largura total, altura igual ao btn-primary */
+    .btn-capturar-prioritario {
+      background: var(--yellow);
+      color: #0d1117;
+      border: none;
+      border-radius: var(--r);
+      padding: 10px 14px;
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: opacity .15s, transform .1s;
+    }
+    .btn-capturar-prioritario:hover { opacity: .9; }
+    .btn-capturar-prioritario:active { transform: scale(.98); }
+    .btn-capturar-prioritario:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+    /* Botão [📸 Popup abriu? Capturar agora] — verde, mesma forma do amarelo */
+    .btn-capturar-agora {
+      background: var(--green);
+      color: #0d1117;
+      border: none;
+      border-radius: var(--r);
+      padding: 10px 14px;
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: opacity .15s, transform .1s;
+    }
+    .btn-capturar-agora:hover { opacity: .9; }
+    .btn-capturar-agora:active { transform: scale(.98); }
+    .btn-capturar-agora:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+    /* Botão "Pular" no bloco prioritário — discreto, largura total */
+    .btn-pular-prioritario {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      color: var(--dim);
+      padding: 7px 12px;
+      font-family: 'Inter', sans-serif;
+      font-size: 11px;
+      cursor: pointer;
+      width: 100%;
+      transition: color .15s, border-color .15s;
+    }
+    .btn-pular-prioritario:hover { color: var(--text); border-color: var(--dim); }
+
+    /* v1.4.3 — Melhoria 1: oculta elementos auxiliares enquanto o wizard
+       está ativo (popups pendentes/capturando). A classe wizard-active é
+       alternada no <body> por renderCapturaPrioritaria(). */
+    body.wizard-active .wizard-hideable { display: none !important; }
+
+    /* v1.4.0 — POPUP MANUAL: botão + form inline */
+    .btn-add-popup-manual {
+      background: transparent; border: 1px dashed var(--border);
+      border-radius: 4px; color: var(--dim); font-size: 10px;
+      padding: 4px 10px; cursor: pointer; margin: 6px 6px 4px 30px;
+      font-family: 'Inter', sans-serif; transition: color .15s, border-color .15s;
+      align-self: flex-start;
+    }
+    .btn-add-popup-manual:hover { color: var(--text); border-color: var(--dim); }
+    .popup-manual-form {
+      padding: 8px 8px 8px 30px; display: flex; flex-direction: column; gap: 5px;
+      background: rgba(121,192,255,.04); border-top: 1px solid rgba(121,192,255,.15);
+    }
+    .popup-manual-form input {
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 4px;
+      color: var(--text); font-size: 11px; padding: 5px 8px;
+      font-family: 'Inter', sans-serif; outline: none; transition: border-color .15s;
+    }
+    .popup-manual-form input.pm-seletor { font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+    .popup-manual-form input:focus { border-color: var(--blue); }
+    .popup-manual-form input::placeholder { color: var(--dim); }
+    .popup-manual-form-acoes { display: flex; gap: 5px; margin-top: 2px; }
+    .btn-pm-confirmar {
+      background: var(--blue); color: #0d1117; border: none; border-radius: 4px;
+      padding: 4px 10px; font-family: 'Inter', sans-serif; font-size: 10px;
+      font-weight: 700; cursor: pointer; transition: opacity .15s;
+    }
+    .btn-pm-confirmar:hover { opacity: .85; }
+    .btn-pm-cancelar {
+      background: transparent; border: 1px solid var(--border); border-radius: 4px;
+      color: var(--dim); padding: 4px 10px; font-family: 'Inter', sans-serif;
+      font-size: 10px; cursor: pointer; transition: color .15s, border-color .15s;
+    }
+    .btn-pm-cancelar:hover { color: var(--text); border-color: var(--dim); }
+    /* Badge "M" em popups de origem manual */
+    .popup-item-origem {
+      display: inline-block; margin-left: 5px; font-family: 'JetBrains Mono', monospace;
+      font-size: 9px; padding: 0 4px; border-radius: 3px;
+      background: var(--blue); color: #0d1117; font-weight: 700; vertical-align: middle;
+    }
 
   </style>
 </head>
@@ -278,7 +434,7 @@
 <div class="tab-content active" id="tab-sessao">
 <section>
 
-  <div class="field-row">
+  <div class="field-row wizard-hideable">
     <div class="field-group">
       <label class="lbl">Projeto</label>
       <input type="text" id="sessao-nome" placeholder="ex: crea_mt" />
@@ -286,35 +442,56 @@
   </div>
 
   <!-- Página atual -->
-  <div class="atual-preview">
+  <div class="atual-preview wizard-hideable">
     <span class="lbl" style="display:block;margin-bottom:4px">Página atual</span>
     <div class="atual-titulo" id="atual-titulo">—</div>
     <div class="atual-url" id="atual-url">—</div>
   </div>
 
   <!-- Descrição da página (por página) -->
-  <div class="field-group">
+  <div class="field-group wizard-hideable">
     <label class="lbl">Descrição desta página</label>
     <textarea class="desc-input" id="sessao-desc" placeholder="ex: página de acompanhamento de ARTs, formulário de novo processo, lista de protocolos..."></textarea>
   </div>
 
-  <button class="btn-primary" id="btn-adicionar">
+  <button class="btn-primary wizard-hideable" id="btn-adicionar">
     <span>＋</span> Adicionar esta página à sessão
   </button>
+  <!-- v1.6.0 — Feature A8: barra de progresso fina abaixo do botão Adicionar -->
+  <div id="cascade-progress-bar" class="wizard-hideable" style="display:none; height:3px; background:var(--accent, #4ea1ff); width:0%; transition:width 200ms linear; border-radius:0 0 4px 4px; margin-top:-2px; margin-bottom:4px;"></div>
+  <!-- v1.6.0 — Feature A9: opt-out do cascade automático no fluxo de adicionar -->
+  <label class="wizard-hideable" style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--muted, #8aa); margin:4px 2px 0 2px;">
+    <input type="checkbox" id="chk-pular-cascade" style="margin:0;">
+    Pular mapeamento automático de cascades nesta página
+  </label>
 
-  <div id="sessao-status" class="status-box"></div>
+  <!-- v1.5.0/v1.6.0: cascade mapper. Botão dedicado para re-rodar após corrigir
+       bug ou erro temporário do servidor (a 1ª passada já roda automaticamente
+       dentro do "Adicionar esta página à sessão"). -->
+  <button class="btn-ghost wizard-hideable" id="btn-mapear-cascades" title="Use se precisar rodar de novo após um erro temporário do servidor. O cascade já roda automaticamente ao adicionar a página à sessão.">
+    🔄 Re-mapear cascades desta página
+  </button>
+  <div id="cascade-progress" class="wizard-hideable" style="display:none; font-size:11px; color:var(--yellow); padding:4px 8px; border-radius:4px; background:rgba(243,179,65,.08); border:1px solid rgba(243,179,65,.3);"></div>
+
+  <div id="sessao-status" class="status-box wizard-hideable"></div>
 
   <!-- Ações da sessão: logo abaixo do "Adicionar", antes da lista -->
-  <div id="sessao-acoes" style="display:none; flex-direction:column; gap:6px;">
+  <div id="sessao-acoes" class="wizard-hideable" style="display:none; flex-direction:column; gap:6px;">
     <button class="btn-green" id="btn-baixar-sessao">
-      ⬇ Baixar sessão (<span id="baixar-qtd">0</span> páginas)
+      ⬇ Baixar (legível) (<span id="baixar-qtd">0</span> páginas)
     </button>
+    <!-- v1.6.0 — Feature C3: download em modo compacto (sem indent, ~84% menor) -->
+    <button class="btn-ghost" id="btn-baixar-sessao-compacto" title="JSON minificado em 1 linha — ideal para colar no Claude downstream sem inflar contexto.">
+      📦 Baixar (compacto)
+    </button>
+    <!-- v1.6.0 — Feature C3: aviso amarelo quando JSON passa de 5.000 linhas -->
+    <div id="aviso-tamanho" style="display:none; font-size:11px; color:var(--yellow); padding:4px 8px; border-radius:4px; background:rgba(243,179,65,.08); border:1px solid rgba(243,179,65,.3);"></div>
     <button class="btn-ghost" id="btn-copiar-json-sessao">⧉ Copiar JSON</button>
     <button class="btn-danger" id="btn-limpar-sessao">Limpar sessão</button>
   </div>
 
   <!-- Header sessão -->
-  <div id="sessao-header" style="display:none" class="sessao-header">
+  <div id="sessao-header" style="display:none" class="sessao-header wizard-hideable">
     <div class="sessao-nome">
       <small>sessão ativa</small>
       <span id="sh-nome">—</span>
@@ -326,6 +503,10 @@
   </div>
 
   <div id="lacunas-container" style="display:none"></div>
+
+  <!-- v1.4.2 — Bloco prioritário de captura: renderizado dinamicamente em
+       renderSessao() quando há popups com status pendente/capturando -->
+  <div id="captura-prioritaria-container" style="display:none"></div>
 
   <div id="paginas-lista" class="paginas-lista"></div>
 
@@ -347,7 +528,7 @@
 </div>
 
 <footer>
-  <span class="footer-tag">Vertex <span>v4.3.0</span></span>
+  <span class="footer-tag">Vertex <span>v4.6.1</span></span>
   <span class="footer-tag footer-url" id="footer-url"></span>
 </footer>
 
